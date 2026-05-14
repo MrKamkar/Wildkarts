@@ -17,6 +17,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import com.wildkarts.net.GameClient;
 
 /**
  * Main menu screen — displays the game title and navigation buttons.
@@ -31,6 +32,10 @@ public class MainMenuScreen implements Screen {
     private BitmapFont font;
     private Texture buttonUpTexture;
     private Texture buttonDownTexture;
+    private Texture textFieldBgTexture;
+    private Texture cursorTexture;
+    
+    private Label statusLabel;
 
     public MainMenuScreen(Game game) {
         this.game = game;
@@ -47,6 +52,8 @@ public class MainMenuScreen implements Screen {
         // --- Create button textures programmatically ---
         buttonUpTexture = createColorTexture(1, 1, new Color(0.3f, 0.3f, 0.35f, 1f));
         buttonDownTexture = createColorTexture(1, 1, new Color(0.5f, 0.5f, 0.55f, 1f));
+        textFieldBgTexture = createColorTexture(1, 1, new Color(0.2f, 0.2f, 0.25f, 1f));
+        cursorTexture = createColorTexture(2, 15, Color.WHITE);
 
         // --- TextButton style (no skin needed) ---
         TextButton.TextButtonStyle buttonStyle = new TextButton.TextButtonStyle();
@@ -55,19 +62,56 @@ public class MainMenuScreen implements Screen {
         buttonStyle.up = new TextureRegionDrawable(new TextureRegion(buttonUpTexture));
         buttonStyle.down = new TextureRegionDrawable(new TextureRegion(buttonDownTexture));
 
+        // --- TextField style ---
+        com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle textFieldStyle = new com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle();
+        textFieldStyle.font = font;
+        textFieldStyle.fontColor = Color.WHITE;
+        textFieldStyle.background = new TextureRegionDrawable(new TextureRegion(textFieldBgTexture));
+        textFieldStyle.cursor = new TextureRegionDrawable(new TextureRegion(cursorTexture));
+
         // --- Title label ---
         Label.LabelStyle titleStyle = new Label.LabelStyle();
         titleStyle.font = font;
         titleStyle.fontColor = Color.GOLD;
         Label titleLabel = new Label("WILDKARTS", titleStyle);
 
-        // --- Play button ---
-        TextButton playButton = new TextButton("Play", buttonStyle);
-        playButton.addListener(new ClickListener() {
+        // --- IP Input Field ---
+        com.badlogic.gdx.scenes.scene2d.ui.TextField ipField = new com.badlogic.gdx.scenes.scene2d.ui.TextField("localhost", textFieldStyle);
+
+        // --- Status Label ---
+        Label.LabelStyle statusStyle = new Label.LabelStyle();
+        statusStyle.font = font;
+        statusStyle.fontColor = Color.LIGHT_GRAY;
+        statusLabel = new Label("", statusStyle);
+
+        // --- Connect button ---
+        TextButton connectButton = new TextButton("CONNECT", buttonStyle);
+        connectButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                game.setScreen(new GameScreen());
-                dispose();
+                statusLabel.setText("Connecting...");
+                connectButton.setDisabled(true);
+                
+                GameClient client = new GameClient();
+                ((WildKartsGame) game).setGameClient(client);
+                
+                client.onJoinAccepted = () -> {
+                    game.setScreen(new GameScreen((WildKartsGame) game));
+                    dispose();
+                };
+                
+                client.onConnectionFailed = () -> {
+                    statusLabel.setText("Connection failed.");
+                    connectButton.setDisabled(false);
+                };
+                
+                client.onDisconnected = () -> {
+                    Screen oldScreen = game.getScreen();
+                    game.setScreen(new MainMenuScreen(game));
+                    if (oldScreen != null) oldScreen.dispose();
+                };
+                
+                client.connect(ipField.getText());
             }
         });
 
@@ -85,8 +129,10 @@ public class MainMenuScreen implements Screen {
         table.setFillParent(true);
         table.center();
 
-        table.add(titleLabel).padBottom(60f).row();
-        table.add(playButton).width(200f).height(50f).padBottom(20f).row();
+        table.add(titleLabel).padBottom(40f).row();
+        table.add(ipField).width(200f).height(40f).padBottom(10f).row();
+        table.add(connectButton).width(200f).height(50f).padBottom(10f).row();
+        table.add(statusLabel).padBottom(20f).row();
         table.add(exitButton).width(200f).height(50f);
 
         stage.addActor(table);
@@ -137,5 +183,7 @@ public class MainMenuScreen implements Screen {
         if (font != null) font.dispose();
         if (buttonUpTexture != null) buttonUpTexture.dispose();
         if (buttonDownTexture != null) buttonDownTexture.dispose();
+        if (textFieldBgTexture != null) textFieldBgTexture.dispose();
+        if (cursorTexture != null) cursorTexture.dispose();
     }
 }

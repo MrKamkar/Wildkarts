@@ -37,13 +37,13 @@ public class InputSystem extends IteratingSystem {
             input.throttle -= 1f;
         }
 
-        // Steering: A = left, D = right
+        // Steering: A = left (positive CCW), D = right (negative CW)
         input.steering = 0f;
         if (Gdx.input.isKeyPressed(Input.Keys.A)) {
-            input.steering -= 1f;
+            input.steering += 1f;
         }
         if (Gdx.input.isKeyPressed(Input.Keys.D)) {
-            input.steering += 1f;
+            input.steering -= 1f;
         }
 
         // Handbrake / drift: Space

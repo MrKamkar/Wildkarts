@@ -1,2 +1,3 @@
 include 'core'
 include 'lwjgl3'
+include 'server'

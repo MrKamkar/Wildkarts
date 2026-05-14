@@ -19,10 +19,10 @@ public class CarComponent implements Component {
     public float maxBackwardSpeed = 30f;
 
     /** Forward driving force in Newtons. */
-    public float driveForce = 250f;
+    public float driveForce = 60f;
 
     /** Braking force multiplier (applied as reverse force). */
-    public float brakeForce = 150f;
+    public float brakeForce = 40f;
 
     // --- Steering parameters ---
 
@@ -49,7 +49,7 @@ public class CarComponent implements Component {
      * Lower value = easier to start drifting.
      * Acts as a clamp on the lateral correction impulse.
      */
-    public float maxLateralImpulse = 2.5f;
+    public float maxLateralImpulse = 20.0f;
 
     /** Linear damping — forward drag. Car slows down when not accelerating. */
     public float linearDamping = 2.0f;

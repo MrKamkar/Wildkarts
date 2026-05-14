@@ -28,10 +28,16 @@ public class PhysicsSystem extends EntitySystem {
 
     private final World world;
     private float accumulator = 0f;
+    private com.badlogic.ashley.utils.ImmutableArray<com.badlogic.ashley.core.Entity> entities;
 
     public PhysicsSystem(World world) {
         super();
         this.world = world;
+    }
+
+    @Override
+    public void addedToEngine(com.badlogic.ashley.core.Engine engine) {
+        entities = engine.getEntitiesFor(com.badlogic.ashley.core.Family.all(com.wildkarts.components.PhysicsComponent.class).get());
     }
 
     @Override
@@ -42,6 +48,16 @@ public class PhysicsSystem extends EntitySystem {
 
         // Step physics in fixed increments
         while (accumulator >= FIXED_TIME_STEP) {
+            if (entities != null) {
+                for (com.badlogic.ashley.core.Entity entity : entities) {
+                    com.wildkarts.components.PhysicsComponent phys = entity.getComponent(com.wildkarts.components.PhysicsComponent.class);
+                    if (phys != null && phys.body != null) {
+                        phys.prevPosition.set(phys.body.getPosition());
+                        phys.prevAngle = phys.body.getAngle();
+                    }
+                }
+            }
+
             world.step(FIXED_TIME_STEP, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
             accumulator -= FIXED_TIME_STEP;
         }

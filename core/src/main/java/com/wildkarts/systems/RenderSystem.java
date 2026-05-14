@@ -28,6 +28,7 @@ public class RenderSystem extends IteratingSystem {
     private final Box2DDebugRenderer debugRenderer;
     private final OrthographicCamera camera;
     private final World world;
+    private final PhysicsSystem physicsSystem;
     private boolean debugDraw = true;
 
     // Car color scheme
@@ -44,10 +45,11 @@ public class RenderSystem extends IteratingSystem {
     private final Vector2 corner = new Vector2();
     private final Vector2 frontTip = new Vector2();
 
-    public RenderSystem(OrthographicCamera camera, World world) {
+    public RenderSystem(OrthographicCamera camera, World world, PhysicsSystem physicsSystem) {
         super(Family.all(PhysicsComponent.class).get());
         this.camera = camera;
         this.world = world;
+        this.physicsSystem = physicsSystem;
         this.shapeRenderer = new ShapeRenderer();
         this.debugRenderer = new Box2DDebugRenderer();
     }
@@ -75,8 +77,19 @@ public class RenderSystem extends IteratingSystem {
 
         if (body == null) return;
 
-        Vector2 pos = body.getPosition();
-        float angle = body.getAngle();
+        float alpha = physicsSystem.getInterpolationAlpha();
+
+        // Visual interpolation between previous and current physics state
+        Vector2 pos = new Vector2(physics.prevPosition).lerp(body.getPosition(), alpha);
+        
+        // Shortest path angle interpolation
+        float currentAngle = body.getAngle();
+        float prevAngle = physics.prevAngle;
+        float diff = (currentAngle - prevAngle) % ((float)Math.PI * 2);
+        if (diff != diff) diff = 0f;
+        if (diff > Math.PI) diff -= Math.PI * 2;
+        else if (diff < -Math.PI) diff += Math.PI * 2;
+        float angle = prevAngle + diff * alpha;
         float hw = physics.widthMeters / 2f;
         float hh = physics.heightMeters / 2f;
 

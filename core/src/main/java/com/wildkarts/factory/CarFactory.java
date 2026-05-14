@@ -47,6 +47,8 @@ public class CarFactory {
         physics.body.setUserData(entity);
 
         // --- Assemble entity ---
+        physics.prevPosition.set(x, y);
+        physics.prevAngle = angle;
         entity.add(input);
         entity.add(car);
         entity.add(physics);
@@ -114,5 +116,16 @@ public class CarFactory {
         shape.dispose();
 
         return body;
+    }
+
+    /**
+     * Creates a remote player car driven by network updates.
+     * It does not have an InputComponent.
+     */
+    public Entity createRemoteCar(float x, float y, float angle) {
+        Entity entity = createCar(x, y, angle);
+        entity.remove(InputComponent.class);
+        entity.add(new com.wildkarts.components.NetworkSyncComponent());
+        return entity;
     }
 }

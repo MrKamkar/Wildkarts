@@ -15,6 +15,12 @@ public class PhysicsComponent implements Component {
     /** The Box2D dynamic body representing this entity in the physics world. */
     public Body body;
 
+    /** Previous position for visual interpolation. */
+    public final com.badlogic.gdx.math.Vector2 prevPosition = new com.badlogic.gdx.math.Vector2();
+
+    /** Previous angle for visual interpolation. */
+    public float prevAngle = 0f;
+
     /** Width of the physics shape in meters (Box2D units). */
     public float widthMeters = 1.0f;
 

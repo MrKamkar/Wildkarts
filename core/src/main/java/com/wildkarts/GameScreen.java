@@ -26,7 +26,23 @@ import com.wildkarts.systems.RenderSystem;
  * This ordering ensures input is processed before physics, and rendering
  * happens after physics has settled — critical for deterministic behavior.
  */
+import java.util.HashMap;
+import java.util.Map;
+import com.wildkarts.systems.NetworkSyncSystem;
+import com.wildkarts.net.packets.PlayerPositionPacket;
+
 public class GameScreen extends ScreenAdapter {
+
+    private final WildKartsGame game;
+    private final com.wildkarts.net.GameClient gameClient;
+    
+    // Map to track remote players
+    private final Map<Integer, com.badlogic.ashley.core.Entity> remotePlayers = new HashMap<>();
+
+    public GameScreen(WildKartsGame game) {
+        this.game = game;
+        this.gameClient = game.getGameClient();
+    }
 
     // Box2D world — zero gravity for top-down view
     private World world;
@@ -72,17 +88,76 @@ public class GameScreen extends ScreenAdapter {
         physicsSystem = new PhysicsSystem(world);
         physicsSystem.priority = 2;
 
-        renderSystem = new RenderSystem(camera, world);
-        renderSystem.priority = 3;
+        NetworkSyncSystem syncSystem = new NetworkSyncSystem();
+        syncSystem.priority = 3;
+
+        renderSystem = new RenderSystem(camera, world, physicsSystem);
+        renderSystem.priority = 4;
 
         engine.addSystem(inputSystem);
         engine.addSystem(movementSystem);
         engine.addSystem(physicsSystem);
+        engine.addSystem(syncSystem);
         engine.addSystem(renderSystem);
 
         // --- Create player car entity ---
         CarFactory carFactory = new CarFactory(world, engine);
         playerCar = carFactory.createCar(0, 0, 0);
+
+        // --- Handle incoming remote player positions ---
+        if (gameClient != null) {
+            gameClient.onPlayerPositionReceived = packet -> {
+                if (packet.playerId == gameClient.localPlayerId) return; // Ignore our own packets
+
+                com.badlogic.ashley.core.Entity remoteCar = remotePlayers.get(packet.playerId);
+                if (remoteCar == null) {
+                    // Spawn new remote car
+                    remoteCar = carFactory.createRemoteCar(packet.x, packet.y, packet.angle);
+                    remotePlayers.put(packet.playerId, remoteCar);
+                }
+
+                com.wildkarts.components.NetworkSyncComponent sync = 
+                    remoteCar.getComponent(com.wildkarts.components.NetworkSyncComponent.class);
+                if (sync != null) {
+                    com.wildkarts.components.NetworkSyncComponent.Snapshot snap = new com.wildkarts.components.NetworkSyncComponent.Snapshot();
+                    snap.timestamp = System.currentTimeMillis();
+                    snap.position.set(packet.x, packet.y);
+                    snap.angle = packet.angle;
+                    snap.velocity.set(packet.velocityX, packet.velocityY);
+                    
+                    // Approximate angular velocity if not provided in packet
+                    snap.angularVelocity = 0; 
+                    if (!sync.snapshots.isEmpty()) {
+                        com.wildkarts.components.NetworkSyncComponent.Snapshot last = sync.snapshots.get(sync.snapshots.size() - 1);
+                        float dt = (snap.timestamp - last.timestamp) / 1000f;
+                        if (dt > 0) {
+                            float diff = (snap.angle - last.angle) % ((float) Math.PI * 2);
+                            if (diff > Math.PI) diff -= Math.PI * 2;
+                            else if (diff < -Math.PI) diff += Math.PI * 2;
+                            snap.angularVelocity = diff / dt;
+                        }
+                    }
+                    
+                    sync.snapshots.add(snap);
+                    if (sync.snapshots.size() > 20) {
+                        sync.snapshots.remove(0);
+                    }
+                }
+            };
+
+            gameClient.onPlayerDisconnected = id -> {
+                com.badlogic.ashley.core.Entity remoteCar = remotePlayers.remove(id);
+                if (remoteCar != null) {
+                    com.wildkarts.components.PhysicsComponent phys = 
+                        remoteCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+                    if (phys != null && phys.body != null) {
+                        world.destroyBody(phys.body);
+                    }
+                    engine.removeEntity(remoteCar);
+                    Gdx.app.log("GameScreen", "Remote player removed: " + id);
+                }
+            };
+        }
 
         // --- Create some boundary walls for testing ---
         createBoundaryWalls();
@@ -104,6 +179,19 @@ public class GameScreen extends ScreenAdapter {
 
         // Update all ECS systems
         engine.update(delta);
+
+        // Send local player position to server
+        if (gameClient != null && playerCar != null) {
+            com.wildkarts.components.PhysicsComponent physics = 
+                playerCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+            if (physics != null && physics.body != null) {
+                Vector2 pos = physics.body.getPosition();
+                Vector2 vel = physics.body.getLinearVelocity();
+                gameClient.sendUnreliable(new PlayerPositionPacket(
+                    gameClient.localPlayerId, pos.x, pos.y, physics.body.getAngle(), vel.x, vel.y
+                ));
+            }
+        }
     }
 
     /**
