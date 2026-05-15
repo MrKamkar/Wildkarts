@@ -3,25 +3,25 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Contains the track layout as flattened float arrays.
- * Using float[] instead of List<Vector2> for efficient Kryo serialization.
- *
- * Reconstruct points: for (int i = 0; i < pointsX.length; i++)
- *     new Vector2(pointsX[i], pointsY[i]);
+ * Contains a chunk of the track JSON data.
  */
 public class MapData extends ReliablePacket {
 
-    /** X coordinates of track waypoints. */
-    public float[] pointsX;
+    /** Total number of chunks for this map. */
+    public int totalChunks;
 
-    /** Y coordinates of track waypoints. */
-    public float[] pointsY;
+    /** Current chunk index (0 to totalChunks-1). */
+    public int chunkIndex;
+
+    /** The actual JSON string fragment. */
+    public String data;
 
     public MapData() {
     }
 
-    public MapData(float[] pointsX, float[] pointsY) {
-        this.pointsX = pointsX;
-        this.pointsY = pointsY;
+    public MapData(int totalChunks, int chunkIndex, String data) {
+        this.totalChunks = totalChunks;
+        this.chunkIndex = chunkIndex;
+        this.data = data;
     }
 }

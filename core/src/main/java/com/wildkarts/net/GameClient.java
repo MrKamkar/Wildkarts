@@ -23,6 +23,13 @@ public class GameClient {
     public Runnable onDisconnected;
     public java.util.function.Consumer<PlayerPositionPacket> onPlayerPositionReceived;
     public java.util.function.Consumer<Integer> onPlayerDisconnected;
+    public java.util.function.Consumer<String> onMapReceived;
+    public Runnable onStartGame;
+
+    private String[] mapChunks;
+    private int receivedChunksCount = 0;
+    private String completedMapJson;
+    private boolean startGamePending = false;
 
     public int localPlayerId = -1;
 
@@ -55,6 +62,10 @@ public class GameClient {
                 Gdx.app.log("GameClient", "Disconnected from server.");
                 connected = false;
                 reliabilityManager.reset();
+                mapChunks = null;
+                receivedChunksCount = 0;
+                completedMapJson = null;
+                startGamePending = false;
                 if (onDisconnected != null) {
                     Gdx.app.postRunnable(onDisconnected);
                 }
@@ -76,8 +87,15 @@ public class GameClient {
                         Gdx.app.postRunnable(onJoinAccepted);
                     }
                 } else if (object instanceof MapData) {
-                    Gdx.app.log("GameClient", "MapData received. Points: " + ((MapData) object).pointsX.length);
-                    // Handle map data here
+                    MapData packet = (MapData) object;
+                    handleMapChunk(packet);
+                } else if (object instanceof StartGamePacket) {
+                    Gdx.app.log("GameClient", "StartGamePacket received.");
+                    if (onStartGame != null) {
+                        Gdx.app.postRunnable(onStartGame);
+                    } else {
+                        startGamePending = true;
+                    }
                 } else if (object instanceof PlayerPositionPacket) {
                     if (onPlayerPositionReceived != null) {
                         PlayerPositionPacket packet = (PlayerPositionPacket) object;
@@ -126,7 +144,62 @@ public class GameClient {
         }
     }
 
+    public void setOnMapReceived(java.util.function.Consumer<String> callback) {
+        this.onMapReceived = callback;
+        if (onMapReceived != null && completedMapJson != null) {
+            Gdx.app.postRunnable(() -> {
+                if (onMapReceived != null && completedMapJson != null) {
+                    onMapReceived.accept(completedMapJson);
+                    completedMapJson = null; // Consume it
+                }
+            });
+        }
+    }
+
+    public void setOnStartGame(Runnable callback) {
+        this.onStartGame = callback;
+        if (onStartGame != null && startGamePending) {
+            Gdx.app.postRunnable(() -> {
+                if (onStartGame != null && startGamePending) {
+                    onStartGame.run();
+                    startGamePending = false;
+                }
+            });
+        }
+    }
+
     public void dispose() {
         client.stop();
+    }
+
+    private void handleMapChunk(MapData packet) {
+        if (mapChunks == null || mapChunks.length != packet.totalChunks) {
+            mapChunks = new String[packet.totalChunks];
+            receivedChunksCount = 0;
+        }
+
+        if (mapChunks[packet.chunkIndex] == null) {
+            mapChunks[packet.chunkIndex] = packet.data;
+            receivedChunksCount++;
+            Gdx.app.log("GameClient", "Received map chunk " + (packet.chunkIndex + 1) + "/" + packet.totalChunks);
+
+            if (receivedChunksCount == packet.totalChunks) {
+                StringBuilder sb = new StringBuilder();
+                for (String chunk : mapChunks) {
+                    sb.append(chunk);
+                }
+                String fullJson = sb.toString();
+                Gdx.app.log("GameClient", "Full map JSON received (" + fullJson.length() + " bytes).");
+                
+                if (onMapReceived != null) {
+                    Gdx.app.postRunnable(() -> onMapReceived.accept(fullJson));
+                } else {
+                    completedMapJson = fullJson;
+                }
+                
+                mapChunks = null;
+                receivedChunksCount = 0;
+            }
+        }
     }
 }

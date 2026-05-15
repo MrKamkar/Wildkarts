@@ -12,6 +12,10 @@ import com.wildkarts.net.AckPacket;
 import com.wildkarts.net.packets.*;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.wildkarts.track.TrackGenerator;
+import com.wildkarts.track.TrackData;
+import com.badlogic.gdx.utils.Json;
+import com.badlogic.gdx.utils.JsonWriter;
 
 /**
  * Headless authoritative server application.
@@ -24,6 +28,9 @@ public class GameServer extends ApplicationAdapter {
     
     // Tracks which connections have already joined to prevent duplicate spawns
     private java.util.Map<Integer, Integer> playerConnectionMap = new java.util.HashMap<>();
+    
+    private String mapJson;
+    private static final int CHUNK_SIZE = 8192; // 8KB chunks
 
     @Override
     public void create() {
@@ -31,6 +38,8 @@ public class GameServer extends ApplicationAdapter {
         reliabilityManager = new UdpReliabilityManager();
 
         Network.register(server.getKryo());
+
+        initializeMap();
 
         server.addListener(new Listener() {
             @Override
@@ -58,6 +67,9 @@ public class GameServer extends ApplicationAdapter {
                     reliabilityManager.onAckReceived(((AckPacket) object).acknowledgedId);
                 } else if (object instanceof JoinRequest) {
                     handleJoinRequest(connection, (JoinRequest) object);
+                } else if (object instanceof MapReadyPacket) {
+                    Gdx.app.log("GameServer", "Client " + connection.getID() + " is READY. Starting game for them.");
+                    reliabilityManager.send(connection, new StartGamePacket());
                 } else if (object instanceof PlayerPositionPacket) {
                     // Broadcast to other players
                     server.sendToAllExceptUDP(connection.getID(), object);
@@ -95,10 +107,38 @@ public class GameServer extends ApplicationAdapter {
         // 1. Send JoinAccepted
         reliabilityManager.send(connection, new JoinAccepted(playerId));
 
-        // 2. Send MapData (dummy map for now)
-        float[] mapX = {0f, 10f, 10f, 0f};
-        float[] mapY = {0f, 0f, 10f, 10f};
-        reliabilityManager.send(connection, new MapData(mapX, mapY));
+        // 2. Send MapData in chunks
+        sendMapData(connection);
+    }
+
+    private void initializeMap() {
+        TrackGenerator generator = new TrackGenerator();
+        // The server looks for this specific file in its working directory (usually root or server folder)
+        String serverMapFile = "Maps/server_map.json";
+        
+        if (!generator.loadMap(serverMapFile)) {
+            Gdx.app.log("GameServer", "No saved map found at " + serverMapFile + ". Creating default track.");
+            generator.addPoint(-20, -20);
+            generator.addPoint(20, -20);
+            generator.addPoint(20, 20);
+            generator.addPoint(-20, 20);
+        }
+        
+        Json json = new Json();
+        json.setOutputType(JsonWriter.OutputType.json);
+        mapJson = json.toJson(generator.exportData());
+        Gdx.app.log("GameServer", "Map initialized. JSON size: " + mapJson.length() + " bytes.");
+    }
+
+    private void sendMapData(Connection connection) {
+        int totalChunks = (int) Math.ceil((double) mapJson.length() / CHUNK_SIZE);
+        for (int i = 0; i < totalChunks; i++) {
+            int start = i * CHUNK_SIZE;
+            int end = Math.min(mapJson.length(), (i + 1) * CHUNK_SIZE);
+            String chunk = mapJson.substring(start, end);
+            reliabilityManager.send(connection, new MapData(totalChunks, i, chunk));
+        }
+        Gdx.app.log("GameServer", "Sent " + totalChunks + " chunks of map data to connection " + connection.getID());
     }
 
     @Override

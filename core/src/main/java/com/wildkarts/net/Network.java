@@ -38,6 +38,8 @@ public final class Network {
         kryo.register(JoinRequest.class);
         kryo.register(JoinAccepted.class);
         kryo.register(MapData.class);
+        kryo.register(MapReadyPacket.class);
+        kryo.register(StartGamePacket.class);
         kryo.register(PowerUpUsed.class);
 
         // Unreliable game packets

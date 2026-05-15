@@ -1,0 +1,27 @@
+[
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -24.354168,
+	"y": 22.89583
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 12.541665,
+	"y": 19.104164
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 22.16666,
+	"y": -7.145835
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -0.7291666,
+	"y": -31.062502
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -26.979166,
+	"y": -14.291666
+}
+]

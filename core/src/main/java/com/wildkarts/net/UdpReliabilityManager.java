@@ -80,18 +80,4 @@ public class UdpReliabilityManager {
     public void setOnMaxRetriesExceeded(Runnable callback) {
         this.onMaxRetriesExceeded = callback;
     }
-
-    private static class PendingEntry {
-        final Connection connection;
-        final ReliablePacket packet;
-        long lastSentTime;
-        int retryCount;
-
-        PendingEntry(Connection connection, ReliablePacket packet) {
-            this.connection = connection;
-            this.packet = packet;
-            this.lastSentTime = System.currentTimeMillis();
-            this.retryCount = 0;
-        }
-    }
 }

@@ -33,7 +33,7 @@ public class TrackGenerator {
     public static final float TILE_SIZE = 0.5f;
 
     /** Half-width of the road in meters (total road width = 2 * this). */
-    private static final float TRACK_HALF_WIDTH = 6f;
+    private float trackHalfWidth = 6f;
 
     /** Spline sampling step — smaller = more accurate rasterization. */
     private static final float SPLINE_STEP = 0.001f;
@@ -206,7 +206,7 @@ public class TrackGenerator {
         Array<Boolean> rightHasCurb = new Array<>();
 
         float curbDepth = 0.6f; // Depth of curb away from road edge
-        float offset = TRACK_HALF_WIDTH + curbDepth / 2f; // Offset to center of the curb
+        float offset = trackHalfWidth + curbDepth / 2f; // Offset to center of the curb
 
         for (int i = 0; i < pathPoints.size; i++) {
             Vector2 p = pathPoints.get(i);
@@ -263,7 +263,7 @@ public class TrackGenerator {
                     int pIdx = (i + j + centerPoints.size) % centerPoints.size;
                     Vector2 cp = centerPoints.get(pIdx);
                     // 0.1f epsilon for floating point inaccuracies
-                    if (pos.dst(cp) < TRACK_HALF_WIDTH - 0.1f) {
+                    if (pos.dst(cp) < trackHalfWidth - 0.1f) {
                         valid = false;
                         break;
                     }
@@ -305,7 +305,7 @@ public class TrackGenerator {
     private void markTilesAround(float worldX, float worldY) {
         int centerCol = worldToGridCol(worldX);
         int centerRow = worldToGridRow(worldY);
-        int radiusTiles = (int) Math.ceil(TRACK_HALF_WIDTH / TILE_SIZE);
+        int radiusTiles = (int) Math.ceil(trackHalfWidth / TILE_SIZE);
 
         for (int dx = -radiusTiles; dx <= radiusTiles; dx++) {
             for (int dy = -radiusTiles; dy <= radiusTiles; dy++) {
@@ -317,7 +317,7 @@ public class TrackGenerator {
                 float tileCenterY = gridToWorldY(row);
                 float dist = Vector2.dst(worldX, worldY, tileCenterX, tileCenterY);
 
-                if (dist <= TRACK_HALF_WIDTH) {
+                if (dist <= trackHalfWidth) {
                     grid[col][row] = TILE_ROAD;
                 }
             }
@@ -428,6 +428,31 @@ public class TrackGenerator {
     public float getOriginY() { return originY; }
     public CatmullRomSpline<Vector2> getSpline() { return spline; }
     public Array<Vector2> getManualPoints() { return manualPoints; }
-    public float getTrackHalfWidth() { return TRACK_HALF_WIDTH; }
+    public float getTrackHalfWidth() { return trackHalfWidth; }
     public Array<CurbSegment> getCurbs() { return curbs; }
+
+    // ─── Data Sync ─────────────────────────────────────────────────────
+
+    public TrackData exportData() {
+        return new TrackData(new Array<>(manualPoints), gridWidth, gridHeight, trackHalfWidth);
+    }
+
+    public void importData(TrackData data) {
+        this.gridWidth = data.gridWidth;
+        this.gridHeight = data.gridHeight;
+        this.trackHalfWidth = data.trackHalfWidth;
+        this.originX = -(gridWidth * TILE_SIZE) / 2f;
+        this.originY = -(gridHeight * TILE_SIZE) / 2f;
+        this.grid = new int[gridWidth][gridHeight];
+        
+        manualPoints.clear();
+        manualPoints.addAll(data.points);
+        
+        if (manualPoints.size >= 4) {
+            rebuildSplineAndGrid();
+        } else {
+            clearGrid();
+            curbs.clear();
+        }
+    }
 }

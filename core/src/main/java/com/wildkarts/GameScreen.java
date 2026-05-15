@@ -41,6 +41,7 @@ import com.wildkarts.systems.RenderSystem;
 import com.wildkarts.systems.TerrainSystem;
 import com.wildkarts.track.TrackGenerator;
 import com.wildkarts.track.TrackRenderer;
+import com.wildkarts.track.TrackData;
 
 /**
  * Main game screen — initializes Box2D world, Ashley engine, and game entities.
@@ -103,16 +104,18 @@ public class GameScreen extends ScreenAdapter {
 
     // --- State Management ---
     public enum GameState {
-        EDITING, PLAYING
+        EDITING, LOADING, PLAYING
     }
     private GameState currentState;
 
     // --- Editor & Play UI ---
     private Stage editorStage;
+    private Stage loadingStage;
     private Stage playStage;
     private BitmapFont uiFont;
     private Skin uiSkin;
     private Label pointCountLabel;
+    private Label loadingLabel;
 
     // --- Car factory (kept for potential respawn) ---
     private CarFactory carFactory;
@@ -138,7 +141,8 @@ public class GameScreen extends ScreenAdapter {
         trackRenderer = new TrackRenderer();
 
         // In multiplayer, load the default map. In Map Editor, start clean.
-        if (isMultiplayerMode) {
+        // Track generation handled via network in multiplayer
+        if (!isMultiplayerMode) {
             trackGenerator.loadMap(MAP_FILE);
         }
 
@@ -181,16 +185,33 @@ public class GameScreen extends ScreenAdapter {
         uiFont = new BitmapFont();
         uiSkin = createProceduralSkin();
         setupEditorUI();
+        setupLoadingUI();
         setupPlayUI();
 
         // --- Initial State ---
         if (!isMultiplayerMode) {
             transitionToEditing();
         } else {
-            transitionToPlaying();
+            transitionToLoading();
             
-            // --- Handle incoming remote player positions (multiplayer only) ---
+            // --- Handle incoming map data (multiplayer only) ---
             if (isMultiplayerMode && gameClient != null) {
+                gameClient.setOnMapReceived(jsonStr -> {
+                    Gdx.app.log("GameScreen", "Building track from received JSON...");
+                    com.badlogic.gdx.utils.Json json = new com.badlogic.gdx.utils.Json();
+                    TrackData data = json.fromJson(TrackData.class, jsonStr);
+                    trackGenerator.importData(data);
+                    
+                    Gdx.app.log("GameScreen", "Track built. Sending MapReady.");
+                    loadingLabel.setText("Map Ready! Waiting for server...");
+                    gameClient.sendReliable(new com.wildkarts.net.packets.MapReadyPacket());
+                });
+
+                gameClient.setOnStartGame(() -> {
+                    Gdx.app.log("GameScreen", "Server signaled game start!");
+                    transitionToPlaying();
+                });
+
                 gameClient.onPlayerPositionReceived = packet -> {
                     if (packet.playerId == gameClient.localPlayerId) return; // Ignore our own packets
 
@@ -287,6 +308,19 @@ public class GameScreen extends ScreenAdapter {
             }
         });
         Gdx.input.setInputProcessor(multiplexer);
+    }
+
+    private void transitionToLoading() {
+        currentState = GameState.LOADING;
+        
+        // Disable driving systems
+        inputSystem.setProcessing(false);
+        terrainSystem.setProcessing(false);
+        movementSystem.setProcessing(false);
+        physicsSystem.setProcessing(false);
+
+        loadingLabel.setText("Connecting & Downloading Map...");
+        Gdx.input.setInputProcessor(loadingStage);
     }
 
     private void transitionToPlaying() {
@@ -513,23 +547,38 @@ public class GameScreen extends ScreenAdapter {
     private void setupPlayUI() {
         playStage = new Stage(new ScreenViewport());
         
-        TextButton editButton = new TextButton("BACK TO EDITOR", uiSkin);
-        editButton.addListener(new ClickListener() {
-            @Override
-            public void clicked(InputEvent event, float x, float y) {
-                if (!isMultiplayerMode) {
-                    transitionToEditing();
-                }
-            }
-        });
-
         Table table = new Table();
         table.setFillParent(true);
         table.top().left();
         table.pad(10f);
-        table.add(editButton).width(150f).height(40f);
+        
+        if (!isMultiplayerMode) {
+            TextButton editButton = new TextButton("BACK TO EDITOR", uiSkin);
+            editButton.addListener(new ClickListener() {
+                @Override
+                public void clicked(InputEvent event, float x, float y) {
+                    transitionToEditing();
+                }
+            });
+            table.add(editButton).width(150f).height(40f);
+        }
         
         playStage.addActor(table);
+    }
+
+    private void setupLoadingUI() {
+        loadingStage = new Stage(new ScreenViewport());
+        
+        loadingLabel = new Label("Loading...", uiSkin);
+        loadingLabel.setAlignment(Align.center);
+        
+        Table table = new Table();
+        table.setFillParent(true);
+        table.center();
+        table.add(loadingLabel).pad(20).row();
+        
+        // Add a progress-like indicator or just a pulse effect could be added later
+        loadingStage.addActor(table);
     }
 
     private void updatePointCountLabel() {
@@ -582,6 +631,9 @@ public class GameScreen extends ScreenAdapter {
             trackRenderer.renderEditorOverlay(camera, trackGenerator);
             editorStage.act(delta);
             editorStage.draw();
+        } else if (currentState == GameState.LOADING) {
+            loadingStage.act(delta);
+            loadingStage.draw();
         } else {
             playStage.act(delta);
             playStage.draw();
@@ -663,6 +715,9 @@ public class GameScreen extends ScreenAdapter {
         if (playStage != null) {
             playStage.getViewport().update(width, height, true);
         }
+        if (loadingStage != null) {
+            loadingStage.getViewport().update(width, height, true);
+        }
     }
 
     @Override
@@ -672,6 +727,7 @@ public class GameScreen extends ScreenAdapter {
         world.dispose();
 
         if (editorStage != null) editorStage.dispose();
+        if (loadingStage != null) loadingStage.dispose();
         if (playStage != null) playStage.dispose();
         if (uiFont != null) uiFont.dispose();
     }
