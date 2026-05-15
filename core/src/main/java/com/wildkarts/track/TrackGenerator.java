@@ -26,28 +26,58 @@ public class TrackGenerator {
     public static final int TILE_ROAD = 1;
 
     /** Grid dimensions in tiles. */
-    public static final int GRID_WIDTH = 200;
-    public static final int GRID_HEIGHT = 200;
+    private int gridWidth = 200;
+    private int gridHeight = 200;
 
     /** Size of one tile in Box2D meters. */
     public static final float TILE_SIZE = 0.5f;
 
     /** Half-width of the road in meters (total road width = 2 * this). */
-    private static final float TRACK_HALF_WIDTH = 3f;
+    private static final float TRACK_HALF_WIDTH = 6f;
 
     /** Spline sampling step — smaller = more accurate rasterization. */
     private static final float SPLINE_STEP = 0.001f;
 
+    /** Width of curb strip in meters. */
+    private static final float CURB_WIDTH = 1.0f;
+
+    /** Curvature angle threshold (degrees) — curbs placed when exceeded. */
+    private static final float CURB_ANGLE_THRESHOLD = 15f;
+
+    /** Spline step for curb detection (coarser than road rasterization). */
+    private static final float CURB_SPLINE_STEP = 0.003f;
+
     // Grid origin: bottom-left corner in world coordinates
-    private final float originX = -(GRID_WIDTH * TILE_SIZE) / 2f;  // -50
-    private final float originY = -(GRID_HEIGHT * TILE_SIZE) / 2f; // -50
+    private float originX;
+    private float originY;
 
     private int[][] grid;
     private final Array<Vector2> manualPoints = new Array<>();
     private CatmullRomSpline<Vector2> spline;
 
+    public static class CurbSegment {
+        public float x, y;
+        public float rotationRad;
+        public boolean isRed;
+    }
+
+    private final Array<CurbSegment> curbs = new Array<>();
+
     public TrackGenerator() {
-        grid = new int[GRID_WIDTH][GRID_HEIGHT];
+        setGridSize(200, 200);
+    }
+
+    public void setGridSize(int width, int height) {
+        this.gridWidth = width;
+        this.gridHeight = height;
+        this.originX = -(gridWidth * TILE_SIZE) / 2f;
+        this.originY = -(gridHeight * TILE_SIZE) / 2f;
+        this.grid = new int[gridWidth][gridHeight];
+        if (manualPoints.size >= 4) {
+            rebuildSplineAndGrid();
+        } else {
+            clearGrid();
+        }
     }
 
     // ─── Point Management ──────────────────────────────────────────────
@@ -73,6 +103,7 @@ public class TrackGenerator {
             } else {
                 spline = null;
                 clearGrid();
+                curbs.clear();
             }
         }
     }
@@ -92,11 +123,177 @@ public class TrackGenerator {
             spline.valueAt(pos, t);
             markTilesAround(pos.x, pos.y);
         }
+
+        // Second pass: detect sharp turns and place curbs on road edges
+        generateCurbs();
+    }
+
+    /**
+     * Walks the spline evenly by distance, evaluates curvature, and generates
+     * independent edge paths. It then places uniform curbs exactly on the edges.
+     */
+    private void generateCurbs() {
+        curbs.clear();
+        if (spline == null) return;
+
+        float stepSize = 0.5f; // Sample the center spline every 0.5 meters
+        float distanceAccumulator = 0f;
+
+        Vector2 currPos = new Vector2();
+        Vector2 prevPos = new Vector2();
+
+        spline.valueAt(prevPos, 0f);
+
+        Array<Vector2> pathPoints = new Array<>();
+        Array<Vector2> pathTangents = new Array<>();
+
+        // 1. Sample center spline evenly by distance
+        for (float t = 0.001f; t <= 1f; t += 0.001f) {
+            spline.valueAt(currPos, t);
+            float dist = prevPos.dst(currPos);
+            distanceAccumulator += dist;
+            prevPos.set(currPos);
+
+            if (distanceAccumulator >= stepSize) {
+                distanceAccumulator -= stepSize;
+                
+                Vector2 p = new Vector2(currPos);
+                Vector2 tg = new Vector2();
+                spline.derivativeAt(tg, t);
+                tg.nor();
+                
+                pathPoints.add(p);
+                pathTangents.add(tg);
+            }
+        }
+
+        if (pathPoints.size == 0) return;
+
+        // 2. Identify sharp curves with a lookahead window
+        boolean[] rawCurb = new boolean[pathPoints.size];
+        int lookahead = 6; // Compare with tangent 3.0m ahead (stepSize=0.5 * 6)
+        float thresholdAngle = 5.0f; // Must bend at least 5 degrees over 3 meters
+        
+        for (int i = 0; i < pathPoints.size; i++) {
+            int nextIdx = (i + lookahead) % pathPoints.size;
+            Vector2 tg1 = pathTangents.get(i);
+            Vector2 tg2 = pathTangents.get(nextIdx);
+            
+            float dot = MathUtils.clamp(tg1.dot(tg2), -1f, 1f);
+            float angleDeg = (float) Math.toDegrees(Math.acos(dot));
+            
+            if (angleDeg > thresholdAngle) {
+                rawCurb[i] = true;
+            }
+        }
+
+        // Dilate curb zones to bridge small gaps and extend them slightly before/after turns
+        boolean[] hasCurb = new boolean[pathPoints.size];
+        int dilation = 5; // Expand by 2.5 meters in both directions
+        for (int i = 0; i < pathPoints.size; i++) {
+            if (rawCurb[i]) {
+                for (int j = -dilation; j <= dilation; j++) {
+                    int idx = (i + j + pathPoints.size) % pathPoints.size;
+                    hasCurb[idx] = true;
+                }
+            }
+        }
+
+        // 3. Generate independent Left and Right Edge paths
+        Array<Vector2> leftEdge = new Array<>();
+        Array<Vector2> rightEdge = new Array<>();
+        Array<Boolean> leftHasCurb = new Array<>();
+        Array<Boolean> rightHasCurb = new Array<>();
+
+        float curbDepth = 0.6f; // Depth of curb away from road edge
+        float offset = TRACK_HALF_WIDTH + curbDepth / 2f; // Offset to center of the curb
+
+        for (int i = 0; i < pathPoints.size; i++) {
+            Vector2 p = pathPoints.get(i);
+            Vector2 tDir = pathTangents.get(i);
+            Vector2 normal = new Vector2(-tDir.y, tDir.x);
+
+            leftEdge.add(new Vector2(p.x + normal.x * offset, p.y + normal.y * offset));
+            rightEdge.add(new Vector2(p.x - normal.x * offset, p.y - normal.y * offset));
+            leftHasCurb.add(hasCurb[i]);
+            rightHasCurb.add(hasCurb[i]);
+        }
+
+        // 4. Generate evenly spaced curbs along each edge path independently
+        generateEdgeCurbs(leftEdge, leftHasCurb, pathPoints, pathTangents, curbs);
+        generateEdgeCurbs(rightEdge, rightHasCurb, pathPoints, pathTangents, curbs);
+    }
+
+    private void generateEdgeCurbs(Array<Vector2> edgePoints, Array<Boolean> edgeHasCurb, 
+                                   Array<Vector2> centerPoints, Array<Vector2> centerTangents, 
+                                   Array<CurbSegment> curbsList) {
+        float curbLength = 1.0f; // Fixed length of curb segment
+        float distAcc = 0f;
+        boolean isRed = true;
+        int colorCounter = 0;
+
+        for (int i = 1; i < edgePoints.size; i++) {
+            Vector2 prevP = edgePoints.get(i - 1);
+            Vector2 currP = edgePoints.get(i);
+            float segmentLen = prevP.dst(currP);
+            
+            if (segmentLen == 0) continue;
+            
+            Vector2 dir = new Vector2(currP).sub(prevP).nor();
+            Vector2 centerDir = centerTangents.get(i);
+
+            // 1. Prevent tangled loops: If the edge path goes backward relative to the road, skip it.
+            if (dir.dot(centerDir) < -0.2f) {
+                continue;
+            }
+
+            float walkedOnSegment = 0f;
+            while (walkedOnSegment + (curbLength - distAcc) <= segmentLen) {
+                float move = curbLength - distAcc;
+                walkedOnSegment += move;
+                distAcc = 0f; // We completed a curb length
+                
+                Vector2 pos = new Vector2(prevP).add(new Vector2(dir).scl(walkedOnSegment));
+                
+                // 2. Distance check: Ensure the curb doesn't intersect the asphalt.
+                // We check nearby center points. If any is closer than the track width, the curb is biting into the road.
+                boolean valid = true;
+                int checkRange = 15; // Local window to check for intersections
+                for (int j = -checkRange; j <= checkRange; j++) {
+                    int pIdx = (i + j + centerPoints.size) % centerPoints.size;
+                    Vector2 cp = centerPoints.get(pIdx);
+                    // 0.1f epsilon for floating point inaccuracies
+                    if (pos.dst(cp) < TRACK_HALF_WIDTH - 0.1f) {
+                        valid = false;
+                        break;
+                    }
+                }
+                
+                // If the end of the curb falls within a curb zone and is valid, place it
+                if (valid && edgeHasCurb.get(i)) {
+                    CurbSegment seg = new CurbSegment();
+                    // Move position to the center of this 1.0m segment
+                    seg.x = pos.x - dir.x * (curbLength / 2f);
+                    seg.y = pos.y - dir.y * (curbLength / 2f);
+                    seg.rotationRad = dir.angleRad();
+                    seg.isRed = isRed;
+                    curbsList.add(seg);
+                    
+                    colorCounter++;
+                    if (colorCounter % 1 == 0) { // Toggle every 1 segment
+                        isRed = !isRed;
+                    }
+                } else {
+                    colorCounter = 0;
+                }
+            }
+            distAcc += (segmentLen - walkedOnSegment);
+        }
     }
 
     private void clearGrid() {
-        for (int col = 0; col < GRID_WIDTH; col++) {
-            for (int row = 0; row < GRID_HEIGHT; row++) {
+        for (int col = 0; col < gridWidth; col++) {
+            for (int row = 0; row < gridHeight; row++) {
                 grid[col][row] = TILE_GRASS;
             }
         }
@@ -114,7 +311,7 @@ public class TrackGenerator {
             for (int dy = -radiusTiles; dy <= radiusTiles; dy++) {
                 int col = centerCol + dx;
                 int row = centerRow + dy;
-                if (col < 0 || col >= GRID_WIDTH || row < 0 || row >= GRID_HEIGHT) continue;
+                if (col < 0 || col >= gridWidth || row < 0 || row >= gridHeight) continue;
 
                 float tileCenterX = gridToWorldX(col);
                 float tileCenterY = gridToWorldY(row);
@@ -136,7 +333,7 @@ public class TrackGenerator {
     public int getTileAt(float worldX, float worldY) {
         int col = worldToGridCol(worldX);
         int row = worldToGridRow(worldY);
-        if (col < 0 || col >= GRID_WIDTH || row < 0 || row >= GRID_HEIGHT) {
+        if (col < 0 || col >= gridWidth || row < 0 || row >= gridHeight) {
             return TILE_GRASS;
         }
         return grid[col][row];
@@ -224,11 +421,13 @@ public class TrackGenerator {
     // ─── Getters ───────────────────────────────────────────────────────
 
     public int[][] getGrid() { return grid; }
-    public int getGridWidth() { return GRID_WIDTH; }
-    public int getGridHeight() { return GRID_HEIGHT; }
+    public int getGridWidth() { return gridWidth; }
+    public int getGridHeight() { return gridHeight; }
     public float getTileSize() { return TILE_SIZE; }
     public float getOriginX() { return originX; }
     public float getOriginY() { return originY; }
     public CatmullRomSpline<Vector2> getSpline() { return spline; }
     public Array<Vector2> getManualPoints() { return manualPoints; }
+    public float getTrackHalfWidth() { return TRACK_HALF_WIDTH; }
+    public Array<CurbSegment> getCurbs() { return curbs; }
 }

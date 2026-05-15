@@ -25,6 +25,12 @@ import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.scenes.scene2d.ui.List;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Skin;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import com.badlogic.gdx.utils.Array;
 import com.wildkarts.components.CarComponent;
 import com.wildkarts.components.TerrainComponent;
 import com.wildkarts.factory.CarFactory;
@@ -49,6 +55,8 @@ import com.wildkarts.track.TrackRenderer;
  *
  * In single-player, an editor mode is active: clicking the map places
  * control points, building a CatmullRomSpline track that can be saved/loaded.
+ * In editor mode all vehicle logic is disabled and the camera zooms
+ * to show the entire grid.
  */
 import java.util.HashMap;
 import java.util.Map;
@@ -83,6 +91,9 @@ public class GameScreen extends ScreenAdapter {
     private com.badlogic.ashley.core.Entity playerCar;
 
     // Systems (kept for disposal and direct access)
+    private InputSystem inputSystem;
+    private TerrainSystem terrainSystem;
+    private MovementSystem movementSystem;
     private RenderSystem renderSystem;
     private PhysicsSystem physicsSystem;
 
@@ -90,12 +101,17 @@ public class GameScreen extends ScreenAdapter {
     private TrackGenerator trackGenerator;
     private TrackRenderer trackRenderer;
 
-    // --- Editor mode (single player only) ---
-    private boolean editorMode;
+    // --- State Management ---
+    public enum GameState {
+        EDITING, PLAYING
+    }
+    private GameState currentState;
+
+    // --- Editor & Play UI ---
     private Stage editorStage;
-    private BitmapFont editorFont;
-    private Texture editorBtnUpTex;
-    private Texture editorBtnDownTex;
+    private Stage playStage;
+    private BitmapFont uiFont;
+    private Skin uiSkin;
     private Label pointCountLabel;
 
     // --- Car factory (kept for potential respawn) ---
@@ -121,50 +137,183 @@ public class GameScreen extends ScreenAdapter {
         trackGenerator = new TrackGenerator();
         trackRenderer = new TrackRenderer();
 
-        // Try loading a saved map
-        trackGenerator.loadMap(MAP_FILE);
+        // In multiplayer, load the default map. In Map Editor, start clean.
+        if (isMultiplayerMode) {
+            trackGenerator.loadMap(MAP_FILE);
+        }
 
         // --- Ashley ECS engine ---
         engine = new Engine();
 
-        // --- Register systems in execution order ---
-        // Priority values define order: lower = runs first
-        InputSystem inputSystem = new InputSystem();
+        // --- Common Factory ---
+        carFactory = new CarFactory(world, engine);
+
+        // --- Initialize all systems ---
+        inputSystem = new InputSystem();
         inputSystem.priority = 0;
 
-        TerrainSystem terrainSystem = new TerrainSystem();
+        terrainSystem = new TerrainSystem();
         terrainSystem.priority = 1;
 
-        MovementSystem movementSystem = new MovementSystem();
+        movementSystem = new MovementSystem();
         movementSystem.priority = 2;
 
         physicsSystem = new PhysicsSystem(world);
         physicsSystem.priority = 3;
 
         renderSystem = new RenderSystem(camera, world, physicsSystem);
+        renderSystem.priority = 5;
 
         engine.addSystem(inputSystem);
         engine.addSystem(terrainSystem);
         engine.addSystem(movementSystem);
         engine.addSystem(physicsSystem);
 
-        // Only add network sync system in multiplayer mode
         if (isMultiplayerMode) {
             NetworkSyncSystem syncSystem = new NetworkSyncSystem();
             syncSystem.priority = 4;
             engine.addSystem(syncSystem);
         }
 
-        renderSystem.priority = 5;
         engine.addSystem(renderSystem);
 
-        // --- Create player car entity ---
-        carFactory = new CarFactory(world, engine);
+        // --- Setup UI ---
+        uiFont = new BitmapFont();
+        uiSkin = createProceduralSkin();
+        setupEditorUI();
+        setupPlayUI();
+
+        // --- Initial State ---
+        if (!isMultiplayerMode) {
+            transitionToEditing();
+        } else {
+            transitionToPlaying();
+            
+            // --- Handle incoming remote player positions (multiplayer only) ---
+            if (isMultiplayerMode && gameClient != null) {
+                gameClient.onPlayerPositionReceived = packet -> {
+                    if (packet.playerId == gameClient.localPlayerId) return; // Ignore our own packets
+
+                    com.badlogic.ashley.core.Entity remoteCar = remotePlayers.get(packet.playerId);
+                    if (remoteCar == null) {
+                        // Spawn new remote car
+                        remoteCar = carFactory.createRemoteCar(packet.x, packet.y, packet.angle);
+                        remotePlayers.put(packet.playerId, remoteCar);
+                    }
+
+                    com.wildkarts.components.NetworkSyncComponent sync =
+                        remoteCar.getComponent(com.wildkarts.components.NetworkSyncComponent.class);
+                    if (sync != null) {
+                        com.wildkarts.components.NetworkSyncComponent.Snapshot snap = new com.wildkarts.components.NetworkSyncComponent.Snapshot();
+                        snap.timestamp = System.currentTimeMillis();
+                        snap.position.set(packet.x, packet.y);
+                        snap.angle = packet.angle;
+                        snap.velocity.set(packet.velocityX, packet.velocityY);
+
+                        // Approximate angular velocity if not provided in packet
+                        snap.angularVelocity = 0;
+                        if (!sync.snapshots.isEmpty()) {
+                            com.wildkarts.components.NetworkSyncComponent.Snapshot last = sync.snapshots.get(sync.snapshots.size() - 1);
+                            float dt = (snap.timestamp - last.timestamp) / 1000f;
+                            if (dt > 0) {
+                                float diff = (snap.angle - last.angle) % ((float) Math.PI * 2);
+                                if (diff > Math.PI) diff -= Math.PI * 2;
+                                else if (diff < -Math.PI) diff += Math.PI * 2;
+                                snap.angularVelocity = diff / dt;
+                            }
+                        }
+
+                        sync.snapshots.add(snap);
+                        if (sync.snapshots.size() > 20) {
+                            sync.snapshots.remove(0);
+                        }
+                    }
+                };
+
+                gameClient.onPlayerDisconnected = id -> {
+                    com.badlogic.ashley.core.Entity remoteCar = remotePlayers.remove(id);
+                    if (remoteCar != null) {
+                        com.wildkarts.components.PhysicsComponent phys =
+                            remoteCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+                        if (phys != null && phys.body != null) {
+                            world.destroyBody(phys.body);
+                        }
+                        engine.removeEntity(remoteCar);
+                        Gdx.app.log("GameScreen", "Remote player removed: " + id);
+                    }
+                };
+            }
+
+            // --- Create boundary walls ---
+            createBoundaryWalls();
+        }
+    }
+
+    // ─── State Transitions ─────────────────────────────────────────────
+
+    private void transitionToEditing() {
+        currentState = GameState.EDITING;
+        
+        // Disable driving systems
+        inputSystem.setProcessing(false);
+        terrainSystem.setProcessing(false);
+        movementSystem.setProcessing(false);
+        physicsSystem.setProcessing(false);
+
+        // Remove player car
+        if (playerCar != null) {
+            com.wildkarts.components.PhysicsComponent phys = playerCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+            if (phys != null && phys.body != null) {
+                world.destroyBody(phys.body);
+            }
+            engine.removeEntity(playerCar);
+            playerCar = null;
+        }
+
+        setupEditorCamera();
+        
+        InputMultiplexer multiplexer = new InputMultiplexer();
+        multiplexer.addProcessor(editorStage);
+        multiplexer.addProcessor(new InputAdapter() {
+            @Override
+            public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+                if (button == Input.Buttons.LEFT && currentState == GameState.EDITING) {
+                    Vector3 worldCoords = camera.unproject(new Vector3(screenX, screenY, 0));
+                    trackGenerator.addPoint(worldCoords.x, worldCoords.y);
+                    updatePointCountLabel();
+                    return true;
+                }
+                return false;
+            }
+        });
+        Gdx.input.setInputProcessor(multiplexer);
+    }
+
+    private void transitionToPlaying() {
+        if (trackGenerator.getManualPoints().size < 4 && !isMultiplayerMode) {
+            Gdx.app.log("Game", "Cannot play: Need at least 4 points to form a track.");
+            return;
+        }
+
+        currentState = GameState.PLAYING;
+        
+        // Enable driving systems
+        inputSystem.setProcessing(true);
+        terrainSystem.setProcessing(true);
+        movementSystem.setProcessing(true);
+        physicsSystem.setProcessing(true);
+
+        // Setup driving camera
+        float aspectRatio = (float) Gdx.graphics.getWidth() / Gdx.graphics.getHeight();
+        camera.viewportWidth = VIEWPORT_WIDTH_METERS;
+        camera.viewportHeight = VIEWPORT_WIDTH_METERS / aspectRatio;
+        camera.update();
+
+        // Spawn player car at start
         Vector2 startPos = trackGenerator.getStartPosition();
         float startAngle = trackGenerator.getStartAngle();
         playerCar = carFactory.createCar(startPos.x, startPos.y, startAngle);
 
-        // Add terrain awareness to player car
         CarComponent carComp = playerCar.getComponent(CarComponent.class);
         TerrainComponent terrain = new TerrainComponent();
         terrain.trackGenerator = trackGenerator;
@@ -172,102 +321,159 @@ public class GameScreen extends ScreenAdapter {
         terrain.defaultDriveForce = carComp.driveForce;
         playerCar.add(terrain);
 
-        // --- Handle incoming remote player positions (multiplayer only) ---
-        if (isMultiplayerMode && gameClient != null) {
-            gameClient.onPlayerPositionReceived = packet -> {
-                if (packet.playerId == gameClient.localPlayerId) return; // Ignore our own packets
-
-                com.badlogic.ashley.core.Entity remoteCar = remotePlayers.get(packet.playerId);
-                if (remoteCar == null) {
-                    // Spawn new remote car
-                    remoteCar = carFactory.createRemoteCar(packet.x, packet.y, packet.angle);
-                    remotePlayers.put(packet.playerId, remoteCar);
-                }
-
-                com.wildkarts.components.NetworkSyncComponent sync =
-                    remoteCar.getComponent(com.wildkarts.components.NetworkSyncComponent.class);
-                if (sync != null) {
-                    com.wildkarts.components.NetworkSyncComponent.Snapshot snap = new com.wildkarts.components.NetworkSyncComponent.Snapshot();
-                    snap.timestamp = System.currentTimeMillis();
-                    snap.position.set(packet.x, packet.y);
-                    snap.angle = packet.angle;
-                    snap.velocity.set(packet.velocityX, packet.velocityY);
-
-                    // Approximate angular velocity if not provided in packet
-                    snap.angularVelocity = 0;
-                    if (!sync.snapshots.isEmpty()) {
-                        com.wildkarts.components.NetworkSyncComponent.Snapshot last = sync.snapshots.get(sync.snapshots.size() - 1);
-                        float dt = (snap.timestamp - last.timestamp) / 1000f;
-                        if (dt > 0) {
-                            float diff = (snap.angle - last.angle) % ((float) Math.PI * 2);
-                            if (diff > Math.PI) diff -= Math.PI * 2;
-                            else if (diff < -Math.PI) diff += Math.PI * 2;
-                            snap.angularVelocity = diff / dt;
-                        }
-                    }
-
-                    sync.snapshots.add(snap);
-                    if (sync.snapshots.size() > 20) {
-                        sync.snapshots.remove(0);
-                    }
-                }
-            };
-
-            gameClient.onPlayerDisconnected = id -> {
-                com.badlogic.ashley.core.Entity remoteCar = remotePlayers.remove(id);
-                if (remoteCar != null) {
-                    com.wildkarts.components.PhysicsComponent phys =
-                        remoteCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
-                    if (phys != null && phys.body != null) {
-                        world.destroyBody(phys.body);
-                    }
-                    engine.removeEntity(remoteCar);
-                    Gdx.app.log("GameScreen", "Remote player removed: " + id);
-                }
-            };
-        }
-
-        // --- Create boundary walls ---
-        createBoundaryWalls();
-
-        // --- Editor mode setup (single player only) ---
-        editorMode = !isMultiplayerMode;
-        if (editorMode) {
-            setupEditorUI();
-        }
+        Gdx.input.setInputProcessor(playStage);
     }
 
     // ─── Editor Mode Setup ─────────────────────────────────────────────
 
     /**
+     * Configures the camera to show the entire grid from above.
+     * Zoom level is dynamically computed from grid dimensions.
+     */
+    private void setupEditorCamera() {
+        float worldWidth = trackGenerator.getGridWidth() * trackGenerator.getTileSize();
+        float worldHeight = trackGenerator.getGridHeight() * trackGenerator.getTileSize();
+        float aspectRatio = (float) Gdx.graphics.getWidth() / Gdx.graphics.getHeight();
+
+        // Fit the larger dimension with 5% padding
+        float neededWidth = worldWidth * 1.05f;
+        float neededHeight = worldHeight * 1.05f;
+
+        if (neededWidth / aspectRatio > neededHeight) {
+            camera.viewportWidth = neededWidth;
+            camera.viewportHeight = neededWidth / aspectRatio;
+        } else {
+            camera.viewportHeight = neededHeight;
+            camera.viewportWidth = neededHeight * aspectRatio;
+        }
+
+        camera.position.set(0, 0, 0);
+        camera.update();
+    }
+
+    /**
      * Creates the editor UI (SAVE button, point count label) and sets up
      * InputMultiplexer so Stage buttons take priority over map clicks.
      */
+    private Skin createProceduralSkin() {
+        Skin skin = new Skin();
+        
+        Pixmap pixmap = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+        pixmap.setColor(Color.WHITE);
+        pixmap.fill();
+        skin.add("white", new Texture(pixmap));
+        
+        skin.add("default", uiFont);
+        
+        TextButton.TextButtonStyle textButtonStyle = new TextButton.TextButtonStyle();
+        textButtonStyle.up = skin.newDrawable("white", Color.DARK_GRAY);
+        textButtonStyle.down = skin.newDrawable("white", Color.GRAY);
+        textButtonStyle.font = skin.getFont("default");
+        skin.add("default", textButtonStyle);
+        
+        TextField.TextFieldStyle textFieldStyle = new TextField.TextFieldStyle();
+        textFieldStyle.font = skin.getFont("default");
+        textFieldStyle.fontColor = Color.WHITE;
+        textFieldStyle.background = skin.newDrawable("white", new Color(0.1f, 0.1f, 0.1f, 1f));
+        textFieldStyle.cursor = skin.newDrawable("white", Color.WHITE);
+        textFieldStyle.selection = skin.newDrawable("white", Color.BLUE);
+        skin.add("default", textFieldStyle);
+
+        List.ListStyle listStyle = new List.ListStyle();
+        listStyle.font = skin.getFont("default");
+        listStyle.fontColorUnselected = Color.WHITE;
+        listStyle.fontColorSelected = Color.WHITE;
+        listStyle.selection = skin.newDrawable("white", Color.BLUE);
+        listStyle.background = skin.newDrawable("white", new Color(0.2f, 0.2f, 0.2f, 1f));
+        skin.add("default", listStyle);
+
+        ScrollPane.ScrollPaneStyle scrollPaneStyle = new ScrollPane.ScrollPaneStyle();
+        scrollPaneStyle.background = skin.newDrawable("white", new Color(0.1f, 0.1f, 0.1f, 1f));
+        skin.add("default", scrollPaneStyle);
+
+        Label.LabelStyle labelStyle = new Label.LabelStyle();
+        labelStyle.font = skin.getFont("default");
+        labelStyle.fontColor = Color.WHITE;
+        skin.add("default", labelStyle);
+
+        return skin;
+    }
+
     private void setupEditorUI() {
         editorStage = new Stage(new ScreenViewport());
-        editorFont = new BitmapFont();
 
-        // Button textures
-        editorBtnUpTex = createColorTexture(1, 1, new Color(0.2f, 0.5f, 0.8f, 1f));
-        editorBtnDownTex = createColorTexture(1, 1, new Color(0.3f, 0.6f, 0.9f, 1f));
+        // ─── Grid Size Panel ───
+        TextField widthField = new TextField(String.valueOf(trackGenerator.getGridWidth()), uiSkin);
+        TextField heightField = new TextField(String.valueOf(trackGenerator.getGridHeight()), uiSkin);
+        TextButton setSizeBtn = new TextButton("Set Grid Size", uiSkin);
 
-        TextButton.TextButtonStyle btnStyle = new TextButton.TextButtonStyle();
-        btnStyle.font = editorFont;
-        btnStyle.fontColor = Color.WHITE;
-        btnStyle.up = new TextureRegionDrawable(new TextureRegion(editorBtnUpTex));
-        btnStyle.down = new TextureRegionDrawable(new TextureRegion(editorBtnDownTex));
-
-        // SAVE button
-        TextButton saveButton = new TextButton("SAVE", btnStyle);
-        saveButton.addListener(new ClickListener() {
+        setSizeBtn.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                trackGenerator.saveMap(MAP_FILE);
+                try {
+                    int w = Integer.parseInt(widthField.getText());
+                    int h = Integer.parseInt(heightField.getText());
+                    trackGenerator.setGridSize(w, h);
+                    setupEditorCamera();
+                    Gdx.app.log("Editor", "Grid resized to " + w + "x" + h);
+                } catch (NumberFormatException e) {
+                    Gdx.app.log("Editor", "Invalid grid size");
+                }
             }
         });
 
-        // UNDO button (removes last point)
-        TextButton undoButton = new TextButton("UNDO", btnStyle);
+        // ─── Save/Load/Play Panel ───
+        TextField nameField = new TextField("custom_map.json", uiSkin);
+        TextButton saveButton = new TextButton("SAVE", uiSkin);
+        TextButton loadButton = new TextButton("LOAD", uiSkin);
+        TextButton playButton = new TextButton("PLAY", uiSkin);
+
+        List<String> mapList = new List<>(uiSkin);
+        ScrollPane scrollPane = new ScrollPane(mapList, uiSkin);
+
+        Runnable refreshList = () -> {
+            FileHandle mapsDir = Gdx.files.local("Maps");
+            if (!mapsDir.exists()) mapsDir.mkdirs();
+            FileHandle[] files = mapsDir.list(".json");
+            Array<String> names = new Array<>();
+            for (FileHandle f : files) {
+                names.add(f.name());
+            }
+            mapList.setItems(names);
+        };
+        refreshList.run();
+
+        saveButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                String name = nameField.getText();
+                if (!name.endsWith(".json")) name += ".json";
+                trackGenerator.saveMap("Maps/" + name);
+                refreshList.run();
+            }
+        });
+
+        loadButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                String name = mapList.getSelected();
+                if (name != null) {
+                    trackGenerator.loadMap("Maps/" + name);
+                    nameField.setText(name);
+                    updatePointCountLabel();
+                    setupEditorCamera();
+                }
+            }
+        });
+
+        playButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                transitionToPlaying();
+            }
+        });
+
+        TextButton undoButton = new TextButton("UNDO POINT", uiSkin);
         undoButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -276,44 +482,54 @@ public class GameScreen extends ScreenAdapter {
             }
         });
 
-        // Point count label
-        Label.LabelStyle labelStyle = new Label.LabelStyle();
-        labelStyle.font = editorFont;
-        labelStyle.fontColor = Color.WHITE;
-        pointCountLabel = new Label("Points: 0", labelStyle);
+        pointCountLabel = new Label("Points: 0", uiSkin);
         updatePointCountLabel();
 
-        // Layout — top-right corner
+        // ─── Layout ───
         Table table = new Table();
         table.setFillParent(true);
         table.top().right();
         table.pad(10f);
 
-        table.add(pointCountLabel).padBottom(5f).row();
-        table.add(saveButton).width(100f).height(35f).padBottom(5f).row();
-        table.add(undoButton).width(100f).height(35f);
+        table.add(new Label("Width:", uiSkin)).padRight(5);
+        table.add(widthField).width(50).padBottom(5);
+        table.add(new Label("Height:", uiSkin)).padLeft(10).padRight(5);
+        table.add(heightField).width(50).padBottom(5).row();
+        table.add(setSizeBtn).colspan(4).fillX().padBottom(20).row();
+
+        table.add(pointCountLabel).colspan(4).padBottom(5).row();
+        table.add(undoButton).colspan(4).fillX().height(35f).padBottom(5).row();
+        table.add(playButton).colspan(4).fillX().height(35f).padBottom(20).row();
+
+        table.add(new Label("File Name:", uiSkin)).colspan(4).row();
+        table.add(nameField).colspan(4).fillX().padBottom(5).row();
+        table.add(saveButton).colspan(2).fillX().padRight(5).height(35f);
+        table.add(loadButton).colspan(2).fillX().height(35f).row();
+        table.add(scrollPane).colspan(4).fillX().height(150f).padTop(10);
 
         editorStage.addActor(table);
+    }
 
-        // --- InputMultiplexer: Stage first (catches button clicks), then map clicks ---
-        InputMultiplexer multiplexer = new InputMultiplexer();
-        multiplexer.addProcessor(editorStage);
-        multiplexer.addProcessor(new InputAdapter() {
+    private void setupPlayUI() {
+        playStage = new Stage(new ScreenViewport());
+        
+        TextButton editButton = new TextButton("BACK TO EDITOR", uiSkin);
+        editButton.addListener(new ClickListener() {
             @Override
-            public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-                if (button == Input.Buttons.LEFT) {
-                    // Convert screen coordinates to world coordinates
-                    Vector3 worldCoords = camera.unproject(new Vector3(screenX, screenY, 0));
-                    trackGenerator.addPoint(worldCoords.x, worldCoords.y);
-                    updatePointCountLabel();
-                    Gdx.app.log("Editor", "Point added at (" + worldCoords.x + ", " + worldCoords.y + ")");
-                    return true;
+            public void clicked(InputEvent event, float x, float y) {
+                if (!isMultiplayerMode) {
+                    transitionToEditing();
                 }
-                return false;
             }
         });
 
-        Gdx.input.setInputProcessor(multiplexer);
+        Table table = new Table();
+        table.setFillParent(true);
+        table.top().left();
+        table.pad(10f);
+        table.add(editButton).width(150f).height(40f);
+        
+        playStage.addActor(table);
     }
 
     private void updatePointCountLabel() {
@@ -340,13 +556,20 @@ public class GameScreen extends ScreenAdapter {
         Gdx.gl.glClearColor(0.18f, 0.45f, 0.15f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
-        // Toggle debug draw with F1
-        if (Gdx.input.isKeyJustPressed(Input.Keys.F1)) {
+        // Handle ESC to go back to editor
+        if (currentState == GameState.PLAYING && !isMultiplayerMode && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            transitionToEditing();
+        }
+
+        // Toggle debug draw with F1 (driving mode only)
+        if (currentState == GameState.PLAYING && Gdx.input.isKeyJustPressed(Input.Keys.F1)) {
             renderSystem.toggleDebugDraw();
         }
 
-        // Follow player car with camera
-        updateCamera();
+        // Follow player car with camera (driving mode only)
+        if (currentState == GameState.PLAYING) {
+            updateCamera();
+        }
 
         // Render track tiles (background layer — before entities)
         trackRenderer.render(camera, trackGenerator);
@@ -355,12 +578,13 @@ public class GameScreen extends ScreenAdapter {
         engine.update(delta);
 
         // Render editor overlay on top of everything (control points, spline)
-        if (editorMode) {
+        if (currentState == GameState.EDITING) {
             trackRenderer.renderEditorOverlay(camera, trackGenerator);
-
-            // Draw editor UI (Stage)
             editorStage.act(delta);
             editorStage.draw();
+        } else {
+            playStage.act(delta);
+            playStage.draw();
         }
 
         // Send local player position to server (multiplayer only)
@@ -423,13 +647,21 @@ public class GameScreen extends ScreenAdapter {
 
     @Override
     public void resize(int width, int height) {
-        float aspectRatio = (float) width / height;
-        camera.viewportWidth = VIEWPORT_WIDTH_METERS;
-        camera.viewportHeight = VIEWPORT_WIDTH_METERS / aspectRatio;
-        camera.update();
+        if (currentState == GameState.EDITING) {
+            // In editor mode, dynamically fit the entire grid
+            setupEditorCamera();
+        } else {
+            float aspectRatio = (float) width / height;
+            camera.viewportWidth = VIEWPORT_WIDTH_METERS;
+            camera.viewportHeight = VIEWPORT_WIDTH_METERS / aspectRatio;
+            camera.update();
+        }
 
         if (editorStage != null) {
             editorStage.getViewport().update(width, height, true);
+        }
+        if (playStage != null) {
+            playStage.getViewport().update(width, height, true);
         }
     }
 
@@ -440,8 +672,7 @@ public class GameScreen extends ScreenAdapter {
         world.dispose();
 
         if (editorStage != null) editorStage.dispose();
-        if (editorFont != null) editorFont.dispose();
-        if (editorBtnUpTex != null) editorBtnUpTex.dispose();
-        if (editorBtnDownTex != null) editorBtnDownTex.dispose();
+        if (playStage != null) playStage.dispose();
+        if (uiFont != null) uiFont.dispose();
     }
 }

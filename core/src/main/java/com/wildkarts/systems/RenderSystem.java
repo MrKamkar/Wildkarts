@@ -77,7 +77,7 @@ public class RenderSystem extends IteratingSystem {
 
         if (body == null) return;
 
-        float alpha = physicsSystem.getInterpolationAlpha();
+        float alpha = physicsSystem != null ? physicsSystem.getInterpolationAlpha() : 1f;
 
         // Visual interpolation between previous and current physics state
         Vector2 pos = new Vector2(physics.prevPosition).lerp(body.getPosition(), alpha);

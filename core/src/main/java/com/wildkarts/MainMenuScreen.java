@@ -95,7 +95,7 @@ public class MainMenuScreen implements Screen {
         statusLabel = new Label("", statusStyle);
 
         // --- Single Player button ---
-        TextButton singlePlayerButton = new TextButton("SINGLE PLAYER", singlePlayerStyle);
+        TextButton singlePlayerButton = new TextButton("MAP EDITOR", singlePlayerStyle);
         singlePlayerButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -105,7 +105,7 @@ public class MainMenuScreen implements Screen {
         });
 
         // --- Connect button (multiplayer) ---
-        TextButton connectButton = new TextButton("MULTIPLAYER CONNECT", buttonStyle);
+        TextButton connectButton = new TextButton("CONNECT", buttonStyle);
         connectButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
