@@ -17,7 +17,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
-import com.wildkarts.net.GameClient;
 
 /**
  * Main menu screen — displays the game title and navigation buttons.
@@ -32,6 +31,8 @@ public class MainMenuScreen implements Screen {
     private BitmapFont font;
     private Texture buttonUpTexture;
     private Texture buttonDownTexture;
+    private Texture singlePlayerUpTexture;
+    private Texture singlePlayerDownTexture;
     private Texture textFieldBgTexture;
     private Texture cursorTexture;
     
@@ -52,6 +53,8 @@ public class MainMenuScreen implements Screen {
         // --- Create button textures programmatically ---
         buttonUpTexture = createColorTexture(1, 1, new Color(0.3f, 0.3f, 0.35f, 1f));
         buttonDownTexture = createColorTexture(1, 1, new Color(0.5f, 0.5f, 0.55f, 1f));
+        singlePlayerUpTexture = createColorTexture(1, 1, new Color(0.15f, 0.55f, 0.25f, 1f));
+        singlePlayerDownTexture = createColorTexture(1, 1, new Color(0.2f, 0.7f, 0.35f, 1f));
         textFieldBgTexture = createColorTexture(1, 1, new Color(0.2f, 0.2f, 0.25f, 1f));
         cursorTexture = createColorTexture(2, 15, Color.WHITE);
 
@@ -61,6 +64,13 @@ public class MainMenuScreen implements Screen {
         buttonStyle.fontColor = Color.WHITE;
         buttonStyle.up = new TextureRegionDrawable(new TextureRegion(buttonUpTexture));
         buttonStyle.down = new TextureRegionDrawable(new TextureRegion(buttonDownTexture));
+
+        // --- Single Player button style (green) ---
+        TextButton.TextButtonStyle singlePlayerStyle = new TextButton.TextButtonStyle();
+        singlePlayerStyle.font = font;
+        singlePlayerStyle.fontColor = Color.WHITE;
+        singlePlayerStyle.up = new TextureRegionDrawable(new TextureRegion(singlePlayerUpTexture));
+        singlePlayerStyle.down = new TextureRegionDrawable(new TextureRegion(singlePlayerDownTexture));
 
         // --- TextField style ---
         com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle textFieldStyle = new com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle();
@@ -84,19 +94,29 @@ public class MainMenuScreen implements Screen {
         statusStyle.fontColor = Color.LIGHT_GRAY;
         statusLabel = new Label("", statusStyle);
 
-        // --- Connect button ---
-        TextButton connectButton = new TextButton("CONNECT", buttonStyle);
+        // --- Single Player button ---
+        TextButton singlePlayerButton = new TextButton("SINGLE PLAYER", singlePlayerStyle);
+        singlePlayerButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                game.setScreen(new GameScreen((WildKartsGame) game, false));
+                dispose();
+            }
+        });
+
+        // --- Connect button (multiplayer) ---
+        TextButton connectButton = new TextButton("MULTIPLAYER CONNECT", buttonStyle);
         connectButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
                 statusLabel.setText("Connecting...");
                 connectButton.setDisabled(true);
                 
-                GameClient client = new GameClient();
+                com.wildkarts.net.GameClient client = new com.wildkarts.net.GameClient();
                 ((WildKartsGame) game).setGameClient(client);
                 
                 client.onJoinAccepted = () -> {
-                    game.setScreen(new GameScreen((WildKartsGame) game));
+                    game.setScreen(new GameScreen((WildKartsGame) game, true));
                     dispose();
                 };
                 
@@ -130,8 +150,9 @@ public class MainMenuScreen implements Screen {
         table.center();
 
         table.add(titleLabel).padBottom(40f).row();
-        table.add(ipField).width(200f).height(40f).padBottom(10f).row();
-        table.add(connectButton).width(200f).height(50f).padBottom(10f).row();
+        table.add(singlePlayerButton).width(250f).height(60f).padBottom(30f).row();
+        table.add(ipField).width(250f).height(40f).padBottom(10f).row();
+        table.add(connectButton).width(250f).height(50f).padBottom(10f).row();
         table.add(statusLabel).padBottom(20f).row();
         table.add(exitButton).width(200f).height(50f);
 
@@ -183,6 +204,8 @@ public class MainMenuScreen implements Screen {
         if (font != null) font.dispose();
         if (buttonUpTexture != null) buttonUpTexture.dispose();
         if (buttonDownTexture != null) buttonDownTexture.dispose();
+        if (singlePlayerUpTexture != null) singlePlayerUpTexture.dispose();
+        if (singlePlayerDownTexture != null) singlePlayerDownTexture.dispose();
         if (textFieldBgTexture != null) textFieldBgTexture.dispose();
         if (cursorTexture != null) cursorTexture.dispose();
     }

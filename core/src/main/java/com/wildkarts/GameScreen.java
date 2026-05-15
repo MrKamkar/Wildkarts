@@ -34,14 +34,16 @@ import com.wildkarts.net.packets.PlayerPositionPacket;
 public class GameScreen extends ScreenAdapter {
 
     private final WildKartsGame game;
+    private final boolean isMultiplayerMode;
     private final com.wildkarts.net.GameClient gameClient;
     
     // Map to track remote players
     private final Map<Integer, com.badlogic.ashley.core.Entity> remotePlayers = new HashMap<>();
 
-    public GameScreen(WildKartsGame game) {
+    public GameScreen(WildKartsGame game, boolean isMultiplayerMode) {
         this.game = game;
-        this.gameClient = game.getGameClient();
+        this.isMultiplayerMode = isMultiplayerMode;
+        this.gameClient = isMultiplayerMode ? game.getGameClient() : null;
     }
 
     // Box2D world — zero gravity for top-down view
@@ -88,24 +90,28 @@ public class GameScreen extends ScreenAdapter {
         physicsSystem = new PhysicsSystem(world);
         physicsSystem.priority = 2;
 
-        NetworkSyncSystem syncSystem = new NetworkSyncSystem();
-        syncSystem.priority = 3;
-
         renderSystem = new RenderSystem(camera, world, physicsSystem);
-        renderSystem.priority = 4;
 
         engine.addSystem(inputSystem);
         engine.addSystem(movementSystem);
         engine.addSystem(physicsSystem);
-        engine.addSystem(syncSystem);
+
+        // Only add network sync system in multiplayer mode
+        if (isMultiplayerMode) {
+            NetworkSyncSystem syncSystem = new NetworkSyncSystem();
+            syncSystem.priority = 3;
+            engine.addSystem(syncSystem);
+        }
+
+        renderSystem.priority = 4;
         engine.addSystem(renderSystem);
 
         // --- Create player car entity ---
         CarFactory carFactory = new CarFactory(world, engine);
         playerCar = carFactory.createCar(0, 0, 0);
 
-        // --- Handle incoming remote player positions ---
-        if (gameClient != null) {
+        // --- Handle incoming remote player positions (multiplayer only) ---
+        if (isMultiplayerMode && gameClient != null) {
             gameClient.onPlayerPositionReceived = packet -> {
                 if (packet.playerId == gameClient.localPlayerId) return; // Ignore our own packets
 
@@ -180,8 +186,8 @@ public class GameScreen extends ScreenAdapter {
         // Update all ECS systems
         engine.update(delta);
 
-        // Send local player position to server
-        if (gameClient != null && playerCar != null) {
+        // Send local player position to server (multiplayer only)
+        if (isMultiplayerMode && gameClient != null && playerCar != null) {
             com.wildkarts.components.PhysicsComponent physics = 
                 playerCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
             if (physics != null && physics.body != null) {
