@@ -41,9 +41,7 @@ public class RenderSystem extends IteratingSystem {
     private final ComponentMapper<CarComponent> carMapper =
             ComponentMapper.getFor(CarComponent.class);
 
-    // Reusable vectors for corner calculations
-    private final Vector2 corner = new Vector2();
-    private final Vector2 frontTip = new Vector2();
+
 
     public RenderSystem(OrthographicCamera camera, World world, PhysicsSystem physicsSystem) {
         super(Family.all(PhysicsComponent.class).get());
@@ -85,10 +83,10 @@ public class RenderSystem extends IteratingSystem {
         // Shortest path angle interpolation
         float currentAngle = body.getAngle();
         float prevAngle = physics.prevAngle;
-        float diff = (currentAngle - prevAngle) % ((float)Math.PI * 2);
-        if (diff != diff) diff = 0f;
-        if (diff > Math.PI) diff -= Math.PI * 2;
-        else if (diff < -Math.PI) diff += Math.PI * 2;
+        float diff = (currentAngle - prevAngle) % MathUtils.PI2;
+        if (Float.isNaN(diff)) diff = 0f;
+        if (diff > MathUtils.PI) diff -= MathUtils.PI2;
+        else if (diff < -MathUtils.PI) diff += MathUtils.PI2;
         float angle = prevAngle + diff * alpha;
         float hw = physics.widthMeters / 2f;
         float hh = physics.heightMeters / 2f;

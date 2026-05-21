@@ -14,9 +14,11 @@ import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import com.wildkarts.net.GameClient;
 
 /**
  * Main menu screen — displays the game title and navigation buttons.
@@ -73,7 +75,7 @@ public class MainMenuScreen implements Screen {
         singlePlayerStyle.down = new TextureRegionDrawable(new TextureRegion(singlePlayerDownTexture));
 
         // --- TextField style ---
-        com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle textFieldStyle = new com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldStyle();
+        TextField.TextFieldStyle textFieldStyle = new TextField.TextFieldStyle();
         textFieldStyle.font = font;
         textFieldStyle.fontColor = Color.WHITE;
         textFieldStyle.background = new TextureRegionDrawable(new TextureRegion(textFieldBgTexture));
@@ -86,7 +88,7 @@ public class MainMenuScreen implements Screen {
         Label titleLabel = new Label("WILDKARTS", titleStyle);
 
         // --- IP Input Field ---
-        com.badlogic.gdx.scenes.scene2d.ui.TextField ipField = new com.badlogic.gdx.scenes.scene2d.ui.TextField("localhost", textFieldStyle);
+        TextField ipField = new TextField("localhost", textFieldStyle);
 
         // --- Status Label ---
         Label.LabelStyle statusStyle = new Label.LabelStyle();
@@ -112,7 +114,7 @@ public class MainMenuScreen implements Screen {
                 statusLabel.setText("Connecting...");
                 connectButton.setDisabled(true);
                 
-                com.wildkarts.net.GameClient client = new com.wildkarts.net.GameClient();
+                GameClient client = new GameClient();
                 ((WildKartsGame) game).setGameClient(client);
                 
                 client.onJoinAccepted = () -> {

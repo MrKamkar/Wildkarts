@@ -10,12 +10,15 @@ import com.wildkarts.net.ReliablePacket;
 import com.wildkarts.net.UdpReliabilityManager;
 import com.wildkarts.net.AckPacket;
 import com.wildkarts.net.packets.*;
-import java.io.IOException;
-import java.util.concurrent.atomic.AtomicInteger;
 import com.wildkarts.track.TrackGenerator;
-import com.wildkarts.track.TrackData;
 import com.badlogic.gdx.utils.Json;
 import com.badlogic.gdx.utils.JsonWriter;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Headless authoritative server application.
@@ -24,10 +27,10 @@ public class GameServer extends ApplicationAdapter {
 
     private Server server;
     private UdpReliabilityManager reliabilityManager;
-    private AtomicInteger playerIdGenerator = new AtomicInteger(1);
+    private final AtomicInteger playerIdGenerator = new AtomicInteger(1);
     
     // Tracks which connections have already joined to prevent duplicate spawns
-    private java.util.Map<Integer, Integer> playerConnectionMap = new java.util.HashMap<>();
+    private final Map<Integer, Integer> playerConnectionMap = new HashMap<>();
     
     private String mapJson;
     private static final int CHUNK_SIZE = 8192; // 8KB chunks
@@ -59,20 +62,30 @@ public class GameServer extends ApplicationAdapter {
             @Override
             public void received(Connection connection, Object object) {
                 // Always immediately ACK any received ReliablePacket
-                if (object instanceof ReliablePacket) {
-                    connection.sendUDP(new AckPacket(((ReliablePacket) object).sequenceId));
+                if (object instanceof ReliablePacket rp) {
+                    connection.sendUDP(new AckPacket(rp.sequenceId));
                 }
 
-                if (object instanceof AckPacket) {
-                    reliabilityManager.onAckReceived(((AckPacket) object).acknowledgedId);
-                } else if (object instanceof JoinRequest) {
-                    handleJoinRequest(connection, (JoinRequest) object);
-                } else if (object instanceof MapReadyPacket) {
-                    Gdx.app.log("GameServer", "Client " + connection.getID() + " is READY. Starting game for them.");
-                    reliabilityManager.send(connection, new StartGamePacket());
-                } else if (object instanceof PlayerPositionPacket) {
-                    // Broadcast to other players
-                    server.sendToAllExceptUDP(connection.getID(), object);
+                if (object == null) return;
+
+                switch (object.getClass().getSimpleName()) {
+                    case "AckPacket" -> {
+                        AckPacket ack = (AckPacket) object;
+                        reliabilityManager.onAckReceived(ack.acknowledgedId);
+                    }
+                    case "JoinRequest" -> {
+                        JoinRequest jr = (JoinRequest) object;
+                        handleJoinRequest(connection, jr);
+                    }
+                    case "MapReadyPacket" -> {
+                        Gdx.app.log("GameServer", "Client " + connection.getID() + " is READY. Starting game for them.");
+                        reliabilityManager.send(connection, new StartGamePacket());
+                    }
+                    case "PlayerPositionPacket" -> {
+                        // Broadcast to other players
+                        server.sendToAllExceptUDP(connection.getID(), object);
+                    }
+                    default -> {}
                 }
             }
         });
@@ -82,8 +95,8 @@ public class GameServer extends ApplicationAdapter {
             if (bindIp.equals("0.0.0.0")) {
                 server.bind(Network.TCP_PORT, Network.UDP_PORT);
             } else {
-                server.bind(new java.net.InetSocketAddress(bindIp, Network.TCP_PORT),
-                            new java.net.InetSocketAddress(bindIp, Network.UDP_PORT));
+                server.bind(new InetSocketAddress(bindIp, Network.TCP_PORT),
+                            new InetSocketAddress(bindIp, Network.UDP_PORT));
             }
             server.start();
             Gdx.app.log("GameServer", "Server started on " + bindIp + " TCP " + Network.TCP_PORT + " and UDP " + Network.UDP_PORT);

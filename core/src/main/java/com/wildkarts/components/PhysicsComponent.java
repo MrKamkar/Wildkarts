@@ -1,6 +1,7 @@
 package com.wildkarts.components;
 
 import com.badlogic.ashley.core.Component;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
 
 /**
@@ -16,7 +17,7 @@ public class PhysicsComponent implements Component {
     public Body body;
 
     /** Previous position for visual interpolation. */
-    public final com.badlogic.gdx.math.Vector2 prevPosition = new com.badlogic.gdx.math.Vector2();
+    public final Vector2 prevPosition = new Vector2();
 
     /** Previous angle for visual interpolation. */
     public float prevAngle = 0f;

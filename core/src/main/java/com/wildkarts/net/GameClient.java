@@ -5,7 +5,6 @@ import com.esotericsoftware.kryonet.Client;
 import com.esotericsoftware.kryonet.Connection;
 import com.esotericsoftware.kryonet.Listener;
 import com.wildkarts.net.packets.*;
-import com.wildkarts.net.AckPacket;
 import java.io.IOException;
 
 /**
@@ -74,38 +73,50 @@ public class GameClient {
             @Override
             public void received(Connection connection, Object object) {
                 // Always immediately ACK any received ReliablePacket
-                if (object instanceof ReliablePacket) {
-                    connection.sendUDP(new AckPacket(((ReliablePacket) object).sequenceId));
+                if (object instanceof ReliablePacket rp) {
+                    connection.sendUDP(new AckPacket(rp.sequenceId));
                 }
 
-                if (object instanceof AckPacket) {
-                    reliabilityManager.onAckReceived(((AckPacket) object).acknowledgedId);
-                } else if (object instanceof JoinAccepted) {
-                    localPlayerId = ((JoinAccepted) object).playerId;
-                    Gdx.app.log("GameClient", "Join accepted. ID: " + localPlayerId);
-                    if (onJoinAccepted != null) {
-                        Gdx.app.postRunnable(onJoinAccepted);
+                if (object == null) return;
+
+                switch (object.getClass().getSimpleName()) {
+                    case "AckPacket" -> {
+                        AckPacket ack = (AckPacket) object;
+                        reliabilityManager.onAckReceived(ack.acknowledgedId);
                     }
-                } else if (object instanceof MapData) {
-                    MapData packet = (MapData) object;
-                    handleMapChunk(packet);
-                } else if (object instanceof StartGamePacket) {
-                    Gdx.app.log("GameClient", "StartGamePacket received.");
-                    if (onStartGame != null) {
-                        Gdx.app.postRunnable(onStartGame);
-                    } else {
-                        startGamePending = true;
+                    case "JoinAccepted" -> {
+                        JoinAccepted ja = (JoinAccepted) object;
+                        localPlayerId = ja.playerId;
+                        Gdx.app.log("GameClient", "Join accepted. ID: " + localPlayerId);
+                        if (onJoinAccepted != null) {
+                            Gdx.app.postRunnable(onJoinAccepted);
+                        }
                     }
-                } else if (object instanceof PlayerPositionPacket) {
-                    if (onPlayerPositionReceived != null) {
-                        PlayerPositionPacket packet = (PlayerPositionPacket) object;
-                        Gdx.app.postRunnable(() -> onPlayerPositionReceived.accept(packet));
+                    case "MapData" -> {
+                        MapData md = (MapData) object;
+                        handleMapChunk(md);
                     }
-                } else if (object instanceof PlayerDisconnectedPacket) {
-                    if (onPlayerDisconnected != null) {
-                        int id = ((PlayerDisconnectedPacket) object).playerId;
-                        Gdx.app.postRunnable(() -> onPlayerDisconnected.accept(id));
+                    case "StartGamePacket" -> {
+                        Gdx.app.log("GameClient", "StartGamePacket received.");
+                        if (onStartGame != null) {
+                            Gdx.app.postRunnable(onStartGame);
+                        } else {
+                            startGamePending = true;
+                        }
                     }
+                    case "PlayerPositionPacket" -> {
+                        PlayerPositionPacket ppp = (PlayerPositionPacket) object;
+                        if (onPlayerPositionReceived != null) {
+                            Gdx.app.postRunnable(() -> onPlayerPositionReceived.accept(ppp));
+                        }
+                    }
+                    case "PlayerDisconnectedPacket" -> {
+                        PlayerDisconnectedPacket pdp = (PlayerDisconnectedPacket) object;
+                        if (onPlayerDisconnected != null) {
+                            Gdx.app.postRunnable(() -> onPlayerDisconnected.accept(pdp.playerId));
+                        }
+                    }
+                    default -> {}
                 }
             }
         });
@@ -184,11 +195,7 @@ public class GameClient {
             Gdx.app.log("GameClient", "Received map chunk " + (packet.chunkIndex + 1) + "/" + packet.totalChunks);
 
             if (receivedChunksCount == packet.totalChunks) {
-                StringBuilder sb = new StringBuilder();
-                for (String chunk : mapChunks) {
-                    sb.append(chunk);
-                }
-                String fullJson = sb.toString();
+                String fullJson = String.join("", mapChunks);
                 Gdx.app.log("GameClient", "Full map JSON received (" + fullJson.length() + " bytes).");
                 
                 if (onMapReceived != null) {

@@ -1,6 +1,7 @@
 package com.wildkarts;
 
 import com.badlogic.gdx.Game;
+import com.wildkarts.net.GameClient;
 
 /**
  * Main game entry point.
@@ -10,18 +11,18 @@ import com.badlogic.gdx.Game;
  */
 public class WildKartsGame extends Game {
 
-    private com.wildkarts.net.GameClient gameClient;
+    private GameClient gameClient;
 
     @Override
     public void create() {
         setScreen(new MainMenuScreen(this));
     }
 
-    public com.wildkarts.net.GameClient getGameClient() {
+    public GameClient getGameClient() {
         return gameClient;
     }
 
-    public void setGameClient(com.wildkarts.net.GameClient gameClient) {
+    public void setGameClient(GameClient gameClient) {
         this.gameClient = gameClient;
     }
 

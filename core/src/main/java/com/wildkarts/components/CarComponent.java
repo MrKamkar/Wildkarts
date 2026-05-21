@@ -2,6 +2,7 @@ package com.wildkarts.components;
 
 import com.badlogic.ashley.core.Component;
 import com.badlogic.gdx.math.Vector2;
+import com.wildkarts.systems.PacejkaTireModel;
 
 /**
  * Simcade car tuning — Pacejka lateral tire model with RWD longitudinal forces.
@@ -233,10 +234,10 @@ public class CarComponent implements Component {
     public float frontLateralForce = 0f;
     public float rearLateralForce = 0f;
 
-    public final com.wildkarts.systems.PacejkaTireModel.AxleRuntime frontTireRuntime =
-            new com.wildkarts.systems.PacejkaTireModel.AxleRuntime();
-    public final com.wildkarts.systems.PacejkaTireModel.AxleRuntime rearTireRuntime =
-            new com.wildkarts.systems.PacejkaTireModel.AxleRuntime();
+    public final PacejkaTireModel.AxleRuntime frontTireRuntime =
+            new PacejkaTireModel.AxleRuntime();
+    public final PacejkaTireModel.AxleRuntime rearTireRuntime =
+            new PacejkaTireModel.AxleRuntime();
     public float frontGripPercent = 0f;
     public float rearGripPercent = 0f;
     public float displaySpeed = 0f;

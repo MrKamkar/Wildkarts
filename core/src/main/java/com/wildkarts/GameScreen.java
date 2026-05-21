@@ -1,49 +1,61 @@
 package com.wildkarts;
 
 import com.badlogic.ashley.core.Engine;
+import com.badlogic.ashley.core.Entity;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.ScreenAdapter;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
-import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.physics.box2d.Body;
+import com.badlogic.gdx.physics.box2d.BodyDef;
+import com.badlogic.gdx.physics.box2d.PolygonShape;
 import com.badlogic.gdx.physics.box2d.World;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
-import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
-import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
-import com.badlogic.gdx.utils.Align;
-import com.badlogic.gdx.utils.viewport.ScreenViewport;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.scenes.scene2d.ui.List;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
+import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
+import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.Json;
+import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import com.wildkarts.components.CarComponent;
+import com.wildkarts.components.NetworkSyncComponent;
+import com.wildkarts.components.PhysicsComponent;
 import com.wildkarts.components.TerrainComponent;
 import com.wildkarts.factory.CarFactory;
+import com.wildkarts.net.GameClient;
+import com.wildkarts.net.packets.MapReadyPacket;
+import com.wildkarts.net.packets.PlayerPositionPacket;
+import com.wildkarts.systems.CarDebugRenderSystem;
 import com.wildkarts.systems.InputSystem;
 import com.wildkarts.systems.MovementSystem;
+import com.wildkarts.systems.NetworkSyncSystem;
 import com.wildkarts.systems.PhysicsSystem;
-import com.wildkarts.systems.CarDebugRenderSystem;
 import com.wildkarts.systems.RenderSystem;
 import com.wildkarts.systems.SkidmarkSystem;
 import com.wildkarts.systems.TerrainSystem;
+import com.wildkarts.track.TrackData;
 import com.wildkarts.track.TrackGenerator;
 import com.wildkarts.track.TrackRenderer;
-import com.wildkarts.track.TrackData;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Main game screen — initializes Box2D world, Ashley engine, and game entities.
@@ -61,19 +73,15 @@ import com.wildkarts.track.TrackData;
  * In editor mode all vehicle logic is disabled and the camera zooms
  * to show the entire grid.
  */
-import java.util.HashMap;
-import java.util.Map;
-import com.wildkarts.systems.NetworkSyncSystem;
-import com.wildkarts.net.packets.PlayerPositionPacket;
 
 public class GameScreen extends ScreenAdapter {
 
     private final WildKartsGame game;
     private final boolean isMultiplayerMode;
-    private final com.wildkarts.net.GameClient gameClient;
+    private final GameClient gameClient;
 
     // Map to track remote players
-    private final Map<Integer, com.badlogic.ashley.core.Entity> remotePlayers = new HashMap<>();
+    private final Map<Integer, Entity> remotePlayers = new HashMap<>();
 
     public GameScreen(WildKartsGame game, boolean isMultiplayerMode) {
         this.game = game;
@@ -91,7 +99,7 @@ public class GameScreen extends ScreenAdapter {
     private OrthographicCamera camera;
 
     // Reference for camera tracking
-    private com.badlogic.ashley.core.Entity playerCar;
+    private Entity playerCar;
 
     // Systems (kept for disposal and direct access)
     private InputSystem inputSystem;
@@ -207,16 +215,16 @@ public class GameScreen extends ScreenAdapter {
             transitionToLoading();
             
             // --- Handle incoming map data (multiplayer only) ---
-            if (isMultiplayerMode && gameClient != null) {
+            if (gameClient != null) {
                 gameClient.setOnMapReceived(jsonStr -> {
                     Gdx.app.log("GameScreen", "Building track from received JSON...");
-                    com.badlogic.gdx.utils.Json json = new com.badlogic.gdx.utils.Json();
+                    Json json = new Json();
                     TrackData data = json.fromJson(TrackData.class, jsonStr);
                     trackGenerator.importData(data);
                     
                     Gdx.app.log("GameScreen", "Track built. Sending MapReady.");
                     loadingLabel.setText("Map Ready! Waiting for server...");
-                    gameClient.sendReliable(new com.wildkarts.net.packets.MapReadyPacket());
+                    gameClient.sendReliable(new MapReadyPacket());
                 });
 
                 gameClient.setOnStartGame(() -> {
@@ -227,17 +235,17 @@ public class GameScreen extends ScreenAdapter {
                 gameClient.onPlayerPositionReceived = packet -> {
                     if (packet.playerId == gameClient.localPlayerId) return; // Ignore our own packets
 
-                    com.badlogic.ashley.core.Entity remoteCar = remotePlayers.get(packet.playerId);
+                    Entity remoteCar = remotePlayers.get(packet.playerId);
                     if (remoteCar == null) {
                         // Spawn new remote car
                         remoteCar = carFactory.createRemoteCar(packet.x, packet.y, packet.angle);
                         remotePlayers.put(packet.playerId, remoteCar);
                     }
 
-                    com.wildkarts.components.NetworkSyncComponent sync =
-                        remoteCar.getComponent(com.wildkarts.components.NetworkSyncComponent.class);
+                    NetworkSyncComponent sync =
+                        remoteCar.getComponent(NetworkSyncComponent.class);
                     if (sync != null) {
-                        com.wildkarts.components.NetworkSyncComponent.Snapshot snap = new com.wildkarts.components.NetworkSyncComponent.Snapshot();
+                        NetworkSyncComponent.Snapshot snap = new NetworkSyncComponent.Snapshot();
                         snap.timestamp = System.currentTimeMillis();
                         snap.position.set(packet.x, packet.y);
                         snap.angle = packet.angle;
@@ -246,7 +254,7 @@ public class GameScreen extends ScreenAdapter {
                         // Approximate angular velocity if not provided in packet
                         snap.angularVelocity = 0;
                         if (!sync.snapshots.isEmpty()) {
-                            com.wildkarts.components.NetworkSyncComponent.Snapshot last = sync.snapshots.get(sync.snapshots.size() - 1);
+                            NetworkSyncComponent.Snapshot last = sync.snapshots.get(sync.snapshots.size() - 1);
                             float dt = (snap.timestamp - last.timestamp) / 1000f;
                             if (dt > 0) {
                                 float diff = (snap.angle - last.angle) % ((float) Math.PI * 2);
@@ -264,10 +272,10 @@ public class GameScreen extends ScreenAdapter {
                 };
 
                 gameClient.onPlayerDisconnected = id -> {
-                    com.badlogic.ashley.core.Entity remoteCar = remotePlayers.remove(id);
+                    Entity remoteCar = remotePlayers.remove(id);
                     if (remoteCar != null) {
-                        com.wildkarts.components.PhysicsComponent phys =
-                            remoteCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+                        PhysicsComponent phys =
+                            remoteCar.getComponent(PhysicsComponent.class);
                         if (phys != null && phys.body != null) {
                             world.destroyBody(phys.body);
                         }
@@ -295,7 +303,7 @@ public class GameScreen extends ScreenAdapter {
 
         // Remove player car
         if (playerCar != null) {
-            com.wildkarts.components.PhysicsComponent phys = playerCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+            PhysicsComponent phys = playerCar.getComponent(PhysicsComponent.class);
             if (phys != null && phys.body != null) {
                 world.destroyBody(phys.body);
             }
@@ -604,14 +612,7 @@ public class GameScreen extends ScreenAdapter {
         }
     }
 
-    private Texture createColorTexture(int width, int height, Color color) {
-        Pixmap pixmap = new Pixmap(width, height, Pixmap.Format.RGBA8888);
-        pixmap.setColor(color);
-        pixmap.fill();
-        Texture texture = new Texture(pixmap);
-        pixmap.dispose();
-        return texture;
-    }
+
 
     // ─── Render Loop ───────────────────────────────────────────────────
 
@@ -651,22 +652,26 @@ public class GameScreen extends ScreenAdapter {
         engine.update(delta);
 
         // Render editor overlay on top of everything (control points, spline)
-        if (currentState == GameState.EDITING) {
-            trackRenderer.renderEditorOverlay(camera, trackGenerator);
-            editorStage.act(delta);
-            editorStage.draw();
-        } else if (currentState == GameState.LOADING) {
-            loadingStage.act(delta);
-            loadingStage.draw();
-        } else {
-            playStage.act(delta);
-            playStage.draw();
+        switch (currentState) {
+            case EDITING -> {
+                trackRenderer.renderEditorOverlay(camera, trackGenerator);
+                editorStage.act(delta);
+                editorStage.draw();
+            }
+            case LOADING -> {
+                loadingStage.act(delta);
+                loadingStage.draw();
+            }
+            case PLAYING -> {
+                playStage.act(delta);
+                playStage.draw();
+            }
         }
 
         // Send local player position to server (multiplayer only)
         if (isMultiplayerMode && gameClient != null && playerCar != null) {
-            com.wildkarts.components.PhysicsComponent physics =
-                playerCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+            PhysicsComponent physics =
+                playerCar.getComponent(PhysicsComponent.class);
             if (physics != null && physics.body != null) {
                 Vector2 pos = physics.body.getPosition();
                 Vector2 vel = physics.body.getLinearVelocity();
@@ -682,8 +687,8 @@ public class GameScreen extends ScreenAdapter {
      */
     private void updateCamera() {
         if (playerCar != null) {
-            com.wildkarts.components.PhysicsComponent physics =
-                    playerCar.getComponent(com.wildkarts.components.PhysicsComponent.class);
+            PhysicsComponent physics =
+                    playerCar.getComponent(PhysicsComponent.class);
             if (physics != null && physics.body != null) {
                 Vector2 carPos = physics.body.getPosition();
                 // Smooth camera follow (lerp)
@@ -708,13 +713,13 @@ public class GameScreen extends ScreenAdapter {
     }
 
     private void createWall(float x, float y, float halfWidth, float halfHeight) {
-        com.badlogic.gdx.physics.box2d.BodyDef wallDef = new com.badlogic.gdx.physics.box2d.BodyDef();
-        wallDef.type = com.badlogic.gdx.physics.box2d.BodyDef.BodyType.StaticBody;
+        BodyDef wallDef = new BodyDef();
+        wallDef.type = BodyDef.BodyType.StaticBody;
         wallDef.position.set(x, y);
 
-        com.badlogic.gdx.physics.box2d.Body wallBody = world.createBody(wallDef);
+        Body wallBody = world.createBody(wallDef);
 
-        com.badlogic.gdx.physics.box2d.PolygonShape wallShape = new com.badlogic.gdx.physics.box2d.PolygonShape();
+        PolygonShape wallShape = new PolygonShape();
         wallShape.setAsBox(halfWidth, halfHeight);
 
         wallBody.createFixture(wallShape, 0f);
