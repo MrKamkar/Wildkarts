@@ -25,6 +25,12 @@ public class GameClient {
     public java.util.function.Consumer<String> onMapReceived;
     public Runnable onStartGame;
 
+    // Race-authoritative callbacks (server-driven)
+    public java.util.function.Consumer<LobbyStatusPacket> onLobbyStatus;
+    public java.util.function.Consumer<RaceStateChangedPacket> onRaceStateChanged;
+    public java.util.function.Consumer<SectorTimePacket> onSectorTime;
+    public java.util.function.Consumer<RacePositionsUpdatePacket> onRacePositionsUpdate;
+
     private String[] mapChunks;
     private int receivedChunksCount = 0;
     private String completedMapJson;
@@ -114,6 +120,30 @@ public class GameClient {
                         PlayerDisconnectedPacket pdp = (PlayerDisconnectedPacket) object;
                         if (onPlayerDisconnected != null) {
                             Gdx.app.postRunnable(() -> onPlayerDisconnected.accept(pdp.playerId));
+                        }
+                    }
+                    case "LobbyStatusPacket" -> {
+                        LobbyStatusPacket lsp = (LobbyStatusPacket) object;
+                        if (onLobbyStatus != null) {
+                            Gdx.app.postRunnable(() -> onLobbyStatus.accept(lsp));
+                        }
+                    }
+                    case "RaceStateChangedPacket" -> {
+                        RaceStateChangedPacket rscp = (RaceStateChangedPacket) object;
+                        if (onRaceStateChanged != null) {
+                            Gdx.app.postRunnable(() -> onRaceStateChanged.accept(rscp));
+                        }
+                    }
+                    case "SectorTimePacket" -> {
+                        SectorTimePacket stp = (SectorTimePacket) object;
+                        if (onSectorTime != null) {
+                            Gdx.app.postRunnable(() -> onSectorTime.accept(stp));
+                        }
+                    }
+                    case "RacePositionsUpdatePacket" -> {
+                        RacePositionsUpdatePacket rpp = (RacePositionsUpdatePacket) object;
+                        if (onRacePositionsUpdate != null) {
+                            Gdx.app.postRunnable(() -> onRacePositionsUpdate.accept(rpp));
                         }
                     }
                     default -> {}

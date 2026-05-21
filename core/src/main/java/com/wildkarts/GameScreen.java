@@ -35,18 +35,24 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Json;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import com.wildkarts.components.CarComponent;
+import com.wildkarts.components.LapComponent;
 import com.wildkarts.components.NetworkSyncComponent;
 import com.wildkarts.components.PhysicsComponent;
+import com.wildkarts.components.RaceComponent;
+import com.wildkarts.components.RaceState;
 import com.wildkarts.components.TerrainComponent;
 import com.wildkarts.factory.CarFactory;
 import com.wildkarts.net.GameClient;
 import com.wildkarts.net.packets.MapReadyPacket;
 import com.wildkarts.net.packets.PlayerPositionPacket;
+import com.wildkarts.net.packets.PlayerReadyPacket;
 import com.wildkarts.systems.CarDebugRenderSystem;
 import com.wildkarts.systems.InputSystem;
+import com.wildkarts.systems.LapSectorSystem;
 import com.wildkarts.systems.MovementSystem;
 import com.wildkarts.systems.NetworkSyncSystem;
 import com.wildkarts.systems.PhysicsSystem;
+import com.wildkarts.systems.RaceStateSystem;
 import com.wildkarts.systems.RenderSystem;
 import com.wildkarts.systems.SkidmarkSystem;
 import com.wildkarts.systems.TerrainSystem;
@@ -102,6 +108,8 @@ public class GameScreen extends ScreenAdapter {
     private Entity playerCar;
 
     // Systems (kept for disposal and direct access)
+    private RaceStateSystem raceStateSystem;
+    private LapSectorSystem lapSectorSystem;
     private InputSystem inputSystem;
     private TerrainSystem terrainSystem;
     private MovementSystem movementSystem;
@@ -109,6 +117,9 @@ public class GameScreen extends ScreenAdapter {
     private SkidmarkSystem skidmarkSystem;
     private CarDebugRenderSystem carDebugRenderSystem;
     private PhysicsSystem physicsSystem;
+
+    // Race manager entity (singleton, carries RaceComponent)
+    private Entity raceEntity;
 
     // --- Track system ---
     private TrackGenerator trackGenerator;
@@ -128,6 +139,11 @@ public class GameScreen extends ScreenAdapter {
     private Skin uiSkin;
     private Label pointCountLabel;
     private Label loadingLabel;
+
+    // Race lobby UI (shown only while WAITING_FOR_PLAYERS)
+    private Table lobbyPanel;
+    private TextButton readyButton;
+    private Label lobbyStatusLabel;
 
     // --- Car factory (kept for potential respawn) ---
     private CarFactory carFactory;
@@ -165,6 +181,9 @@ public class GameScreen extends ScreenAdapter {
         carFactory = new CarFactory(world, engine);
 
         // --- Initialize all systems ---
+        raceStateSystem = new RaceStateSystem();
+        raceStateSystem.priority = -1;
+
         inputSystem = new InputSystem();
         inputSystem.priority = 0;
 
@@ -177,6 +196,9 @@ public class GameScreen extends ScreenAdapter {
         physicsSystem = new PhysicsSystem(world);
         physicsSystem.priority = 3;
 
+        lapSectorSystem = new LapSectorSystem(trackGenerator, gameClient);
+        lapSectorSystem.priority = 4; // After physics, before NetworkSyncSystem's display work
+
         skidmarkSystem = new SkidmarkSystem(camera);
         skidmarkSystem.priority = 4;
 
@@ -186,10 +208,12 @@ public class GameScreen extends ScreenAdapter {
         carDebugRenderSystem = new CarDebugRenderSystem(camera);
         carDebugRenderSystem.priority = 6;
 
+        engine.addSystem(raceStateSystem);
         engine.addSystem(inputSystem);
         engine.addSystem(terrainSystem);
         engine.addSystem(movementSystem);
         engine.addSystem(physicsSystem);
+        engine.addSystem(lapSectorSystem);
 
         if (isMultiplayerMode) {
             NetworkSyncSystem syncSystem = new NetworkSyncSystem();
@@ -237,8 +261,9 @@ public class GameScreen extends ScreenAdapter {
 
                     Entity remoteCar = remotePlayers.get(packet.playerId);
                     if (remoteCar == null) {
-                        // Spawn new remote car
+                        // Spawn new remote car (with LapComponent for leaderboard sync)
                         remoteCar = carFactory.createRemoteCar(packet.x, packet.y, packet.angle);
+                        remoteCar.add(new LapComponent());
                         remotePlayers.put(packet.playerId, remoteCar);
                     }
 
@@ -283,6 +308,8 @@ public class GameScreen extends ScreenAdapter {
                         Gdx.app.log("GameScreen", "Remote player removed: " + id);
                     }
                 };
+
+                wireRaceNetworkCallbacks();
             }
 
             // --- Create boundary walls ---
@@ -296,10 +323,18 @@ public class GameScreen extends ScreenAdapter {
         currentState = GameState.EDITING;
         
         // Disable driving systems
+        raceStateSystem.setProcessing(false);
+        lapSectorSystem.setProcessing(false);
         inputSystem.setProcessing(false);
         terrainSystem.setProcessing(false);
         movementSystem.setProcessing(false);
         physicsSystem.setProcessing(false);
+
+        // Remove race entity
+        if (raceEntity != null) {
+            engine.removeEntity(raceEntity);
+            raceEntity = null;
+        }
 
         // Remove player car
         if (playerCar != null) {
@@ -334,6 +369,8 @@ public class GameScreen extends ScreenAdapter {
         currentState = GameState.LOADING;
         
         // Disable driving systems
+        raceStateSystem.setProcessing(false);
+        lapSectorSystem.setProcessing(false);
         inputSystem.setProcessing(false);
         terrainSystem.setProcessing(false);
         movementSystem.setProcessing(false);
@@ -352,6 +389,8 @@ public class GameScreen extends ScreenAdapter {
         currentState = GameState.PLAYING;
         
         // Enable driving systems
+        raceStateSystem.setProcessing(true);
+        lapSectorSystem.setProcessing(true);
         inputSystem.setProcessing(true);
         terrainSystem.setProcessing(true);
         movementSystem.setProcessing(true);
@@ -378,8 +417,152 @@ public class GameScreen extends ScreenAdapter {
         terrain.defaultLinearDamping = carComp.linearDamping;
         terrain.defaultAngularDamping = carComp.angularDamping;
         playerCar.add(terrain);
+        playerCar.add(new LapComponent());
+
+        // Spin up race manager: WAITING_FOR_PLAYERS until the player presses Ready.
+        startRaceLobby();
+
+        // Reset Ready UI for a fresh race
+        if (readyButton != null) {
+            readyButton.setDisabled(false);
+            readyButton.setText("READY");
+        }
 
         Gdx.input.setInputProcessor(playStage);
+    }
+
+    /**
+     * Creates the race manager entity in WAITING_FOR_PLAYERS state.
+     * Configures it with track-derived data (total control points, max laps,
+     * required players). Transition to COUNTDOWN happens automatically in
+     * {@code RaceStateSystem} once {@code readyPlayers >= requiredPlayers}.
+     */
+    private void startRaceLobby() {
+        if (raceEntity != null) {
+            engine.removeEntity(raceEntity);
+        }
+        raceEntity = new Entity();
+        RaceComponent race = new RaceComponent();
+        race.currentState = RaceState.WAITING_FOR_PLAYERS;
+        race.countdownTimer = 3.0f;
+        race.raceTimer = 0.0f;
+        race.maxLaps = 3;
+        race.totalSectors = 3;
+        race.totalTrackPoints = trackGenerator.getManualPoints().size;
+        race.readyPlayers = 0;
+        race.requiredPlayers = 1;
+        // Multiplayer: server is authoritative — local FSM only mirrors timers.
+        race.serverAuthoritative = isMultiplayerMode;
+        raceEntity.add(race);
+        engine.addEntity(raceEntity);
+    }
+
+    /**
+     * Marks the local racer as ready. In single-player this is called
+     * immediately after spawn so the countdown starts right away. In
+     * multiplayer this would be wired to a "Ready" button / network signal.
+     */
+    public void markLocalPlayerReady() {
+        if (raceEntity == null || playerCar == null) return;
+        RaceComponent race = raceEntity.getComponent(RaceComponent.class);
+        LapComponent lap = playerCar.getComponent(LapComponent.class);
+        if (race == null || lap == null) return;
+        if (lap.ready) return;
+        lap.ready = true;
+        race.readyPlayers++;
+        Gdx.app.log("Race", "Local player READY (" + race.readyPlayers
+                + "/" + race.requiredPlayers + ")");
+    }
+
+    /** Returns the current RaceComponent, or null if no race is active. */
+    public RaceComponent getRaceComponent() {
+        if (raceEntity == null) return null;
+        return raceEntity.getComponent(RaceComponent.class);
+    }
+
+    // ─── Multiplayer Race Sync ─────────────────────────────────────────
+
+    /**
+     * Wires every race-related packet from {@link GameClient} into local
+     * ECS state. All handlers run on the libGDX main thread (GameClient
+     * already uses {@code Gdx.app.postRunnable}).
+     */
+    private void wireRaceNetworkCallbacks() {
+        if (gameClient == null) return;
+
+        gameClient.onLobbyStatus = packet -> {
+            RaceComponent race = getRaceComponent();
+            if (race != null) {
+                race.readyPlayers = packet.readyPlayers;
+                race.requiredPlayers = packet.totalPlayers;
+            }
+            if (lobbyStatusLabel != null) {
+                lobbyStatusLabel.setText("Players ready: " + packet.readyPlayers
+                        + " / " + packet.totalPlayers);
+            }
+        };
+
+        gameClient.onRaceStateChanged = packet -> {
+            RaceComponent race = getRaceComponent();
+            if (race == null) return;
+            RaceState[] values = RaceState.values();
+            if (packet.newStateOrdinal < 0 || packet.newStateOrdinal >= values.length) return;
+            race.currentState = values[packet.newStateOrdinal];
+            race.countdownTimer = packet.countdownTimer;
+            race.raceTimer = packet.raceTimer;
+            Gdx.app.log("GameScreen", "Server race state: " + race.currentState);
+        };
+
+        gameClient.onSectorTime = packet -> {
+            Entity carEntity = findCarEntityByPlayerId(packet.playerId);
+            if (carEntity == null) return;
+            LapComponent lap = carEntity.getComponent(LapComponent.class);
+            if (lap == null) return;
+
+            lap.currentLap = packet.currentLap;
+            lap.nextTrackPointIndex = packet.nextTrackPointIndex;
+            lap.currentSector = packet.currentSector;
+            lap.finished = packet.finished;
+            lap.lastRequestedPointIndex = -1; // server confirmed; allow next request
+
+            if (packet.sectorIndex >= 0 && packet.sectorIndex < lap.currentLapSectorTimes.length) {
+                lap.currentLapSectorTimes[packet.sectorIndex] = packet.sectorTime;
+                lap.bestSectorTimes[packet.sectorIndex] = packet.bestSectorTime;
+                lap.lastSectorDelta = packet.delta;
+                lap.currentSectorElapsed = 0f;
+            }
+
+            RaceComponent race = getRaceComponent();
+            if (race != null && packet.raceTimerSnapshot > 0f) {
+                race.raceTimer = packet.raceTimerSnapshot;
+            }
+        };
+
+        gameClient.onRacePositionsUpdate = packet -> {
+            if (packet.playerIds == null) return;
+            for (int i = 0; i < packet.playerIds.length; i++) {
+                int pid = packet.playerIds[i];
+                Entity carEntity = findCarEntityByPlayerId(pid);
+                if (carEntity == null) continue;
+                LapComponent lap = carEntity.getComponent(LapComponent.class);
+                if (lap == null) continue;
+                lap.racePosition = packet.positions[i];
+                lap.currentLap = packet.currentLaps[i];
+                // We DON'T overwrite nextTrackPointIndex here for the local
+                // player — that field is owned by SectorTimePacket round-trips.
+                if (pid != gameClient.localPlayerId) {
+                    lap.nextTrackPointIndex = packet.nextTrackPointIndices[i];
+                }
+            }
+        };
+    }
+
+    /** Resolves a player id to the local-player car or one of the remote-player cars. */
+    private Entity findCarEntityByPlayerId(int playerId) {
+        if (gameClient != null && playerId == gameClient.localPlayerId) {
+            return playerCar;
+        }
+        return remotePlayers.get(playerId);
     }
 
     // ─── Editor Mode Setup ─────────────────────────────────────────────
@@ -570,12 +753,13 @@ public class GameScreen extends ScreenAdapter {
 
     private void setupPlayUI() {
         playStage = new Stage(new ScreenViewport());
-        
-        Table table = new Table();
-        table.setFillParent(true);
-        table.top().left();
-        table.pad(10f);
-        
+
+        // Top-left: editor return button (single-player only)
+        Table topLeft = new Table();
+        topLeft.setFillParent(true);
+        topLeft.top().left();
+        topLeft.pad(10f);
+
         if (!isMultiplayerMode) {
             TextButton editButton = new TextButton("BACK TO EDITOR", uiSkin);
             editButton.addListener(new ClickListener() {
@@ -584,10 +768,53 @@ public class GameScreen extends ScreenAdapter {
                     transitionToEditing();
                 }
             });
-            table.add(editButton).width(150f).height(40f);
+            topLeft.add(editButton).width(150f).height(40f);
         }
-        
-        playStage.addActor(table);
+        playStage.addActor(topLeft);
+
+        // Center-bottom: race lobby panel (Ready button + lobby status)
+        lobbyPanel = new Table();
+        lobbyPanel.setFillParent(true);
+        lobbyPanel.bottom().pad(40f);
+
+        lobbyStatusLabel = new Label("Waiting for players...", uiSkin);
+        lobbyStatusLabel.setAlignment(Align.center);
+
+        readyButton = new TextButton("READY", uiSkin);
+        readyButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                onReadyButtonClicked();
+            }
+        });
+
+        lobbyPanel.add(lobbyStatusLabel).padBottom(10f).row();
+        lobbyPanel.add(readyButton).width(180f).height(50f);
+
+        // Hidden by default — toggled in render() based on race state.
+        lobbyPanel.setVisible(false);
+        playStage.addActor(lobbyPanel);
+    }
+
+    /**
+     * Ready button click handler. Single-player marks ready locally;
+     * multiplayer sends a {@link PlayerReadyPacket} to the server.
+     */
+    private void onReadyButtonClicked() {
+        if (isMultiplayerMode) {
+            if (gameClient == null) return;
+            LapComponent lap = playerCar != null
+                    ? playerCar.getComponent(LapComponent.class) : null;
+            boolean newReady = lap == null || !lap.ready;
+            if (lap != null) lap.ready = newReady;
+            gameClient.sendReliable(new PlayerReadyPacket(newReady));
+            readyButton.setText(newReady ? "UN-READY" : "READY");
+            Gdx.app.log("GameScreen", "Sent PlayerReadyPacket(" + newReady + ")");
+        } else {
+            markLocalPlayerReady();
+            readyButton.setDisabled(true);
+            readyButton.setText("READY!");
+        }
     }
 
     private void setupLoadingUI() {
@@ -621,6 +848,15 @@ public class GameScreen extends ScreenAdapter {
         // Clear screen — grass green background (matches tile color at grid edges)
         Gdx.gl.glClearColor(0.18f, 0.45f, 0.15f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+
+        // Toggle lobby panel based on race phase (only meaningful while PLAYING)
+        if (currentState == GameState.PLAYING && lobbyPanel != null) {
+            RaceComponent race = getRaceComponent();
+            boolean showLobby = race != null && race.currentState == RaceState.WAITING_FOR_PLAYERS;
+            lobbyPanel.setVisible(showLobby);
+        } else if (lobbyPanel != null) {
+            lobbyPanel.setVisible(false);
+        }
 
         // Handle ESC to go back to editor
         if (currentState == GameState.PLAYING && !isMultiplayerMode && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {

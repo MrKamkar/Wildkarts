@@ -35,6 +35,10 @@ public class GameServer extends ApplicationAdapter {
     private String mapJson;
     private static final int CHUNK_SIZE = 8192; // 8KB chunks
 
+    // Authoritative race state (FSM, sector validation, leaderboard)
+    private TrackGenerator trackGenerator;
+    private ServerRaceManager raceManager;
+
     @Override
     public void create() {
         server = new Server();
@@ -43,6 +47,8 @@ public class GameServer extends ApplicationAdapter {
         Network.register(server.getKryo());
 
         initializeMap();
+
+        raceManager = new ServerRaceManager(server, reliabilityManager, trackGenerator);
 
         server.addListener(new Listener() {
             @Override
@@ -57,6 +63,7 @@ public class GameServer extends ApplicationAdapter {
                 if (playerId != null) {
                     server.sendToAllExceptTCP(connection.getID(), new PlayerDisconnectedPacket(playerId));
                 }
+                raceManager.onPlayerDisconnected(connection);
             }
 
             @Override
@@ -78,12 +85,21 @@ public class GameServer extends ApplicationAdapter {
                         handleJoinRequest(connection, jr);
                     }
                     case "MapReadyPacket" -> {
-                        Gdx.app.log("GameServer", "Client " + connection.getID() + " is READY. Starting game for them.");
+                        Gdx.app.log("GameServer", "Client " + connection.getID() + " loaded map.");
+                        // Map loaded — let the client into the race lobby.
                         reliabilityManager.send(connection, new StartGamePacket());
                     }
                     case "PlayerPositionPacket" -> {
-                        // Broadcast to other players
+                        // Relay to peers AND feed the race manager so it can validate point passes.
+                        PlayerPositionPacket ppp = (PlayerPositionPacket) object;
+                        raceManager.onPlayerPosition(connection, ppp.x, ppp.y);
                         server.sendToAllExceptUDP(connection.getID(), object);
+                    }
+                    case "PlayerReadyPacket" -> {
+                        raceManager.onPlayerReady(connection, (PlayerReadyPacket) object);
+                    }
+                    case "PlayerPassedPointPacket" -> {
+                        raceManager.onPlayerPassedPoint(connection, (PlayerPassedPointPacket) object);
                     }
                     default -> {}
                 }
@@ -120,27 +136,31 @@ public class GameServer extends ApplicationAdapter {
         // 1. Send JoinAccepted
         reliabilityManager.send(connection, new JoinAccepted(playerId));
 
-        // 2. Send MapData in chunks
+        // 2. Register with race manager (lobby tracking)
+        raceManager.onPlayerJoined(playerId, connection, request.playerName);
+
+        // 3. Send MapData in chunks
         sendMapData(connection);
     }
 
     private void initializeMap() {
-        TrackGenerator generator = new TrackGenerator();
+        trackGenerator = new TrackGenerator();
         // The server looks for this specific file in its working directory (usually root or server folder)
         String serverMapFile = "Maps/server_map.json";
         
-        if (!generator.loadMap(serverMapFile)) {
+        if (!trackGenerator.loadMap(serverMapFile)) {
             Gdx.app.log("GameServer", "No saved map found at " + serverMapFile + ". Creating default track.");
-            generator.addPoint(-20, -20);
-            generator.addPoint(20, -20);
-            generator.addPoint(20, 20);
-            generator.addPoint(-20, 20);
+            trackGenerator.addPoint(-20, -20);
+            trackGenerator.addPoint(20, -20);
+            trackGenerator.addPoint(20, 20);
+            trackGenerator.addPoint(-20, 20);
         }
         
         Json json = new Json();
         json.setOutputType(JsonWriter.OutputType.json);
-        mapJson = json.toJson(generator.exportData());
-        Gdx.app.log("GameServer", "Map initialized. JSON size: " + mapJson.length() + " bytes.");
+        mapJson = json.toJson(trackGenerator.exportData());
+        Gdx.app.log("GameServer", "Map initialized. JSON size: " + mapJson.length()
+                + " bytes. Track points: " + trackGenerator.getManualPoints().size);
     }
 
     private void sendMapData(Connection connection) {
@@ -158,6 +178,11 @@ public class GameServer extends ApplicationAdapter {
     public void render() {
         // Update reliability manager to handle retransmissions
         reliabilityManager.update();
+
+        // Drive the authoritative race FSM (~30 Hz via HeadlessApplication)
+        if (raceManager != null) {
+            raceManager.update(Gdx.graphics.getDeltaTime());
+        }
     }
 
     @Override

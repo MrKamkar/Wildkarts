@@ -30,6 +30,7 @@ public final class Network {
     public static void register(Kryo kryo) {
         // Primitive array types used in packets
         kryo.register(float[].class);
+        kryo.register(int[].class);
 
         // Control packets
         kryo.register(AckPacket.class);
@@ -42,8 +43,16 @@ public final class Network {
         kryo.register(StartGamePacket.class);
         kryo.register(PowerUpUsed.class);
 
+        // Race / lobby packets (reliable)
+        kryo.register(PlayerReadyPacket.class);
+        kryo.register(LobbyStatusPacket.class);
+        kryo.register(RaceStateChangedPacket.class);
+        kryo.register(PlayerPassedPointPacket.class);
+        kryo.register(SectorTimePacket.class);
+
         // Unreliable game packets
         kryo.register(PlayerPositionPacket.class);
         kryo.register(PlayerDisconnectedPacket.class);
+        kryo.register(RacePositionsUpdatePacket.class);
     }
 }
