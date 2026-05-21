@@ -37,7 +37,9 @@ import com.wildkarts.factory.CarFactory;
 import com.wildkarts.systems.InputSystem;
 import com.wildkarts.systems.MovementSystem;
 import com.wildkarts.systems.PhysicsSystem;
+import com.wildkarts.systems.CarDebugRenderSystem;
 import com.wildkarts.systems.RenderSystem;
+import com.wildkarts.systems.SkidmarkSystem;
 import com.wildkarts.systems.TerrainSystem;
 import com.wildkarts.track.TrackGenerator;
 import com.wildkarts.track.TrackRenderer;
@@ -96,6 +98,8 @@ public class GameScreen extends ScreenAdapter {
     private TerrainSystem terrainSystem;
     private MovementSystem movementSystem;
     private RenderSystem renderSystem;
+    private SkidmarkSystem skidmarkSystem;
+    private CarDebugRenderSystem carDebugRenderSystem;
     private PhysicsSystem physicsSystem;
 
     // --- Track system ---
@@ -165,8 +169,14 @@ public class GameScreen extends ScreenAdapter {
         physicsSystem = new PhysicsSystem(world);
         physicsSystem.priority = 3;
 
+        skidmarkSystem = new SkidmarkSystem(camera);
+        skidmarkSystem.priority = 4;
+
         renderSystem = new RenderSystem(camera, world, physicsSystem);
         renderSystem.priority = 5;
+
+        carDebugRenderSystem = new CarDebugRenderSystem(camera);
+        carDebugRenderSystem.priority = 6;
 
         engine.addSystem(inputSystem);
         engine.addSystem(terrainSystem);
@@ -179,7 +189,9 @@ public class GameScreen extends ScreenAdapter {
             engine.addSystem(syncSystem);
         }
 
+        engine.addSystem(skidmarkSystem);
         engine.addSystem(renderSystem);
+        engine.addSystem(carDebugRenderSystem);
 
         // --- Setup UI ---
         uiFont = new BitmapFont();
@@ -352,7 +364,11 @@ public class GameScreen extends ScreenAdapter {
         TerrainComponent terrain = new TerrainComponent();
         terrain.trackGenerator = trackGenerator;
         terrain.defaultMaxForwardSpeed = carComp.maxForwardSpeed;
-        terrain.defaultDriveForce = carComp.driveForce;
+        terrain.defaultEngineForce = carComp.engineForce;
+        terrain.defaultRollingResistance = carComp.rollingResistance;
+        terrain.defaultAeroDragCoeff = carComp.aerodynamicDragCoeff;
+        terrain.defaultLinearDamping = carComp.linearDamping;
+        terrain.defaultAngularDamping = carComp.angularDamping;
         playerCar.add(terrain);
 
         Gdx.input.setInputProcessor(playStage);
@@ -615,6 +631,14 @@ public class GameScreen extends ScreenAdapter {
             renderSystem.toggleDebugDraw();
         }
 
+        // Toggle Pacejka HUD with F3
+        if (currentState == GameState.PLAYING && Gdx.input.isKeyJustPressed(Input.Keys.F3) && playerCar != null) {
+            CarComponent car = playerCar.getComponent(CarComponent.class);
+            if (car != null) {
+                car.debugOverlayEnabled = !car.debugOverlayEnabled;
+            }
+        }
+
         // Follow player car with camera (driving mode only)
         if (currentState == GameState.PLAYING) {
             updateCamera();
@@ -715,6 +739,9 @@ public class GameScreen extends ScreenAdapter {
         if (playStage != null) {
             playStage.getViewport().update(width, height, true);
         }
+        if (carDebugRenderSystem != null) {
+            carDebugRenderSystem.resize(width, height);
+        }
         if (loadingStage != null) {
             loadingStage.getViewport().update(width, height, true);
         }
@@ -723,6 +750,8 @@ public class GameScreen extends ScreenAdapter {
     @Override
     public void dispose() {
         renderSystem.dispose();
+        if (skidmarkSystem != null) skidmarkSystem.dispose();
+        if (carDebugRenderSystem != null) carDebugRenderSystem.dispose();
         trackRenderer.dispose();
         world.dispose();
 

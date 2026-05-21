@@ -105,7 +105,7 @@ public class CarFactory {
         PolygonShape shape = new PolygonShape();
         shape.setAsBox(width / 2f, height / 2f);
 
-        // Fixture definition
+        // Fixture definition (density placeholder — mass is overridden below)
         FixtureDef fixtureDef = new FixtureDef();
         fixtureDef.shape = shape;
         fixtureDef.density = 1.0f;
@@ -114,6 +114,16 @@ public class CarFactory {
 
         body.createFixture(fixtureDef);
         shape.dispose();
+
+        float inertia = car.inertia;
+        if (inertia <= 0f) {
+            inertia = (1f / 12f) * car.mass * (width * width + height * height);
+        }
+        MassData massData = new MassData();
+        massData.mass = car.mass;
+        massData.I = inertia;
+        massData.center.setZero();
+        body.setMassData(massData);
 
         return body;
     }

@@ -1,34 +1,37 @@
 package com.wildkarts.systems;
 
+import com.badlogic.ashley.core.ComponentMapper;
+import com.badlogic.ashley.core.Entity;
 import com.badlogic.ashley.core.EntitySystem;
-import com.badlogic.gdx.math.Vector2;
+import com.badlogic.ashley.core.Family;
+import com.badlogic.ashley.utils.ImmutableArray;
+import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.World;
+import com.wildkarts.components.CarComponent;
+import com.wildkarts.components.InputComponent;
+import com.wildkarts.components.PhysicsComponent;
 
 /**
- * Manages Box2D world stepping with fixed time step (accumulator pattern).
- * 
- * This ensures deterministic physics regardless of frame rate — critical for:
- * - Consistent gameplay across different hardware
- * - Future multiplayer synchronization (server and client run same physics)
- * - Reproducible physics behavior
+ * Box2D fixed timestep with per-step vehicle force application.
  */
 public class PhysicsSystem extends EntitySystem {
 
-    /** Fixed physics step — 60 Hz. */
-    private static final float FIXED_TIME_STEP = 1 / 60f;
+    public static final float FIXED_TIME_STEP = 1f / 60f;
 
-    /** Max accumulated time to prevent spiral of death on lag spikes. */
     private static final float MAX_FRAME_TIME = 0.25f;
-
-    /** Box2D velocity solver iterations — higher = more accurate but slower. */
     private static final int VELOCITY_ITERATIONS = 8;
-
-    /** Box2D position solver iterations. */
     private static final int POSITION_ITERATIONS = 3;
+
+    private final ComponentMapper<CarComponent> carMapper = ComponentMapper.getFor(CarComponent.class);
+    private final ComponentMapper<PhysicsComponent> physicsMapper =
+            ComponentMapper.getFor(PhysicsComponent.class);
+    private final ComponentMapper<InputComponent> inputMapper =
+            ComponentMapper.getFor(InputComponent.class);
 
     private final World world;
     private float accumulator = 0f;
-    private com.badlogic.ashley.utils.ImmutableArray<com.badlogic.ashley.core.Entity> entities;
+    private ImmutableArray<Entity> physicsEntities;
+    private ImmutableArray<Entity> drivenCars;
 
     public PhysicsSystem(World world) {
         super();
@@ -37,43 +40,52 @@ public class PhysicsSystem extends EntitySystem {
 
     @Override
     public void addedToEngine(com.badlogic.ashley.core.Engine engine) {
-        entities = engine.getEntitiesFor(com.badlogic.ashley.core.Family.all(com.wildkarts.components.PhysicsComponent.class).get());
+        physicsEntities = engine.getEntitiesFor(Family.all(PhysicsComponent.class).get());
+        drivenCars = engine.getEntitiesFor(
+                Family.all(InputComponent.class, CarComponent.class, PhysicsComponent.class).get());
     }
 
     @Override
     public void update(float deltaTime) {
-        // Clamp frame time to prevent physics explosion on lag
         float frameTime = Math.min(deltaTime, MAX_FRAME_TIME);
         accumulator += frameTime;
 
-        // Step physics in fixed increments
         while (accumulator >= FIXED_TIME_STEP) {
-            if (entities != null) {
-                for (com.badlogic.ashley.core.Entity entity : entities) {
-                    com.wildkarts.components.PhysicsComponent phys = entity.getComponent(com.wildkarts.components.PhysicsComponent.class);
-                    if (phys != null && phys.body != null) {
-                        phys.prevPosition.set(phys.body.getPosition());
-                        phys.prevAngle = phys.body.getAngle();
-                    }
-                }
-            }
+            snapshotPreviousTransforms();
+
+            simulateDrivenVehicles();
 
             world.step(FIXED_TIME_STEP, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
             accumulator -= FIXED_TIME_STEP;
         }
     }
 
-    /** Returns the Box2D world for external access (e.g., debug rendering). */
+    private void snapshotPreviousTransforms() {
+        if (physicsEntities == null) return;
+        for (Entity entity : physicsEntities) {
+            PhysicsComponent phys = physicsMapper.get(entity);
+            if (phys != null && phys.body != null) {
+                phys.prevPosition.set(phys.body.getPosition());
+                phys.prevAngle = phys.body.getAngle();
+            }
+        }
+    }
+
+    private void simulateDrivenVehicles() {
+        if (drivenCars == null) return;
+        for (Entity entity : drivenCars) {
+            CarComponent car = carMapper.get(entity);
+            PhysicsComponent physics = physicsMapper.get(entity);
+            InputComponent input = inputMapper.get(entity);
+            if (car == null || physics == null || physics.body == null || input == null) continue;
+            MovementSystem.simulatePhysicsStep(physics.body, car, input, physics);
+        }
+    }
+
     public World getWorld() {
         return world;
     }
 
-    /**
-     * Returns the interpolation alpha for rendering between physics steps.
-     * Useful for smooth rendering when frame rate differs from physics rate.
-     * 
-     * Future use: interpolation system for multiplayer state smoothing.
-     */
     public float getInterpolationAlpha() {
         return accumulator / FIXED_TIME_STEP;
     }

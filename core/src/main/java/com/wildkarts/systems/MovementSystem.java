@@ -12,17 +12,16 @@ import com.wildkarts.components.InputComponent;
 import com.wildkarts.components.PhysicsComponent;
 
 /**
- * Core driving system — translates InputComponent values into Box2D forces.
- * 
- * Physics model based on iforce2d's top-down car tutorial:
- * 1. Cancel lateral velocity (with drift threshold)
- * 2. Apply forward drag
- * 3. Calculate speed-dependent steering angle
- * 4. Apply drive force
- * 
- * This system does NOT call world.step() — that's PhysicsSystem's job.
+ * Vehicle physics — Pacejka with standard bicycle-model slip angles.
  */
 public class MovementSystem extends IteratingSystem {
+
+    private static final float MIN_SPEED_FOR_STEER = 0.3f;
+
+    private static final Vector2 LOCAL_FORWARD = new Vector2(0f, 1f);
+    private static final Vector2 LOCAL_RIGHT = new Vector2(1f, 0f);
+    private static final Vector2 LOCAL_FRONT_AXLE = new Vector2();
+    private static final Vector2 LOCAL_REAR_AXLE = new Vector2();
 
     private final ComponentMapper<InputComponent> inputMapper =
             ComponentMapper.getFor(InputComponent.class);
@@ -31,13 +30,14 @@ public class MovementSystem extends IteratingSystem {
     private final ComponentMapper<PhysicsComponent> physicsMapper =
             ComponentMapper.getFor(PhysicsComponent.class);
 
-    // Reusable vectors to avoid GC pressure
-    private final Vector2 forwardDir = new Vector2();
-    private final Vector2 lateralDir = new Vector2();
-    private final Vector2 lateralVelocity = new Vector2();
-    private final Vector2 impulse = new Vector2();
-    private final Vector2 forceVec = new Vector2();
-    private final Vector2 currentVelocity = new Vector2();
+    private static final Vector2 forwardDir = new Vector2();
+    private static final Vector2 lateralDir = new Vector2();
+    private static final Vector2 velocity = new Vector2();
+    private static final Vector2 frontAxlePos = new Vector2();
+    private static final Vector2 rearAxlePos = new Vector2();
+    private static final Vector2 force = new Vector2();
+    private static final Vector2 wheelForward = new Vector2();
+    private static final Vector2 wheelLateral = new Vector2();
 
     public MovementSystem() {
         super(Family.all(InputComponent.class, CarComponent.class, PhysicsComponent.class).get());
@@ -49,134 +49,434 @@ public class MovementSystem extends IteratingSystem {
         CarComponent car = carMapper.get(entity);
         PhysicsComponent physics = physicsMapper.get(entity);
         Body body = physics.body;
-
         if (body == null) return;
 
-        float angle = body.getAngle();
+        forwardDir.set(body.getWorldVector(LOCAL_FORWARD));
+        velocity.set(body.getLinearVelocity());
+        float speedMult = car.globalSpeedMultiplier * car.physicsSpeedScale;
+        float forwardSpeed = velocity.dot(forwardDir);
+        float speedAbs = Math.abs(forwardSpeed);
+        float omega = body.getAngularVelocity();
 
-        // --- Calculate local direction vectors ---
-        // Forward = along the body's "up" direction (Y-axis in local space)
-        forwardDir.set(MathUtils.cos(angle + MathUtils.HALF_PI),
-                       MathUtils.sin(angle + MathUtils.HALF_PI));
-        // Lateral = perpendicular to forward (X-axis in local space)
-        lateralDir.set(MathUtils.cos(angle), MathUtils.sin(angle));
-
-        // Current velocity
-        currentVelocity.set(body.getLinearVelocity());
-
-        // Forward speed (positive = moving forward, negative = moving backward)
-        float forwardSpeed = currentVelocity.dot(forwardDir);
-
-        // --- 1. LATERAL FRICTION (drift control) ---
-        applyLateralFriction(body, car, input.braking);
-
-        // --- 2. FORWARD DRAG ---
-        applyForwardDrag(body, forwardSpeed, car);
-
-        // --- 3. STEERING ---
-        applySteering(body, car, input.steering, forwardSpeed, deltaTime);
-
-        // --- 4. DRIVE FORCE ---
-        applyDriveForce(body, car, input.throttle, forwardSpeed);
+        updateSteering(car, input, forwardSpeed, speedAbs, speedMult, omega, deltaTime);
     }
 
-    /**
-     * Cancels lateral (sideways) velocity to prevent sliding.
-     * The impulse is clamped to maxLateralImpulse — exceeding this = drift!
-     * Braking reduces lateral friction for easier drifting.
-     */
-    private void applyLateralFriction(Body body, CarComponent car, boolean braking) {
-        float lateralSpeed = body.getLinearVelocity().dot(lateralDir);
-        lateralVelocity.set(lateralDir).scl(lateralSpeed);
+    public static void simulatePhysicsStep(Body body, CarComponent car, InputComponent input,
+                                            PhysicsComponent physics) {
+        float forceScale = car.physicsForceScale;
+        float speedMult = car.globalSpeedMultiplier * car.physicsSpeedScale;
 
-        // Impulse to fully cancel lateral velocity
-        impulse.set(lateralVelocity).scl(-body.getMass());
+        forwardDir.set(body.getWorldVector(LOCAL_FORWARD));
+        lateralDir.set(body.getWorldVector(LOCAL_RIGHT));
 
-        // Apply friction coefficient
-        float friction = braking ? car.lateralFriction * 0.5f : car.lateralFriction;
-        impulse.scl(friction);
+        car.forwardDirWorld.set(forwardDir);
+        car.lateralDirWorld.set(lateralDir);
 
-        // Clamp impulse magnitude — this is what creates drift
-        float impulseMagnitude = impulse.len();
-        if (impulseMagnitude > car.maxLateralImpulse) {
-            impulse.scl(car.maxLateralImpulse / impulseMagnitude);
+        velocity.set(body.getLinearVelocity());
+        float forwardSpeed = velocity.dot(forwardDir);
+        float lateralSpeed = velocity.dot(lateralDir);
+        float speedAbs = Math.abs(forwardSpeed);
+        float chassisSpeed = velocity.len();
+        float omega = body.getAngularVelocity();
+
+        car.displaySpeed = speedAbs * speedMult;
+        car.displayForwardSpeed = forwardSpeed * speedMult;
+
+        float steerRad = car.currentSteeringAngle * MathUtils.degreesToRadians;
+        boolean reversing = forwardSpeed < -0.5f;
+        if (reversing) {
+            steerRad = -steerRad;
+        }
+        float rearGripMult = input.braking ? car.handbrakeRearGripMultiplier : 1f;
+        // Reduce grip when reversing - less control going backwards
+        float reverseGripMult = reversing ? 0.6f : 1f;
+
+        LOCAL_FRONT_AXLE.set(0f, car.frontAxleDistance);
+        LOCAL_REAR_AXLE.set(0f, -car.rearAxleDistance);
+        frontAxlePos.set(body.getWorldPoint(LOCAL_FRONT_AXLE));
+        rearAxlePos.set(body.getWorldPoint(LOCAL_REAR_AXLE));
+        car.frontAxleWorld.set(frontAxlePos);
+        car.rearAxleWorld.set(rearAxlePos);
+
+        float halfTrack = car.rearWheelHalfTrack > 0f
+                ? car.rearWheelHalfTrack
+                : physics.widthMeters * 0.42f;
+        car.rearLeftWheelWorld.set(rearAxlePos).add(lateralDir.x * halfTrack, lateralDir.y * halfTrack);
+        car.rearRightWheelWorld.set(rearAxlePos).sub(lateralDir.x * halfTrack, lateralDir.y * halfTrack);
+
+        float gripScale = computeGripScale(chassisSpeed, car);
+
+        float steerInputAbs = Math.abs(input.steering);
+        boolean isTurning = steerInputAbs > 0.01f;
+        boolean isHandbrake = input.braking;
+        boolean straightMode = !isTurning && !isHandbrake;
+
+        float[] normalLoads = new float[2];
+        PacejkaTireModel.computeNormalLoads(car, normalLoads);
+        applyTurnLoadTransfer(normalLoads, input.steering, car);
+        car.frontNormalLoadN = normalLoads[0];
+        car.rearNormalLoadN = normalLoads[1];
+        float refLoad = car.referenceNormalLoadN > 0f
+                ? car.referenceNormalLoadN
+                : (car.mass * PacejkaTireModel.GRAVITY * 0.5f);
+
+        float alphaFrontRaw = computeBicycleSlipAngle(forwardSpeed, lateralSpeed, omega,
+                car.frontAxleDistance, steerRad, car);
+        float alphaRearRaw = computeBicycleSlipAngle(forwardSpeed, lateralSpeed, omega,
+                -car.rearAxleDistance, 0f, car);
+
+        car.frontSlipAngle = alphaFrontRaw;
+        car.rearSlipAngle = alphaRearRaw;
+
+        PacejkaTireModel.AxleConfig frontCfg = buildFrontConfig(car);
+        PacejkaTireModel.AxleConfig rearCfg = buildRearConfig(car);
+
+        float alphaFront = PacejkaTireModel.clampSlip(alphaFrontRaw, car.pacejkaMaxSlipAngle);
+        float alphaRear = PacejkaTireModel.clampSlip(alphaRearRaw, car.pacejkaMaxSlipAngle);
+
+        car.frontSlipAngleEffective = alphaFront;
+        car.rearSlipAngleEffective = alphaRear;
+
+        float fyFront = evaluateAxleForce(car, frontCfg, car.frontTireRuntime, alphaFrontRaw, alphaFront,
+                car.frontNormalLoadN, refLoad, gripScale, forceScale, car.surfaceMu, reverseGripMult, 1f);
+        float fyRear = evaluateAxleForce(car, rearCfg, car.rearTireRuntime, alphaRearRaw, alphaRear,
+                car.rearNormalLoadN, refLoad, gripScale, forceScale, car.surfaceMu, reverseGripMult, rearGripMult);
+
+        car.frontLateralForce = fyFront;
+        car.rearLateralForce = fyRear;
+        car.frontGripPercent = PacejkaTireModel.gripUsagePercent(fyFront, car.frontTireRuntime.peakForceScaledN);
+        car.rearGripPercent = PacejkaTireModel.gripUsagePercent(fyRear, car.rearTireRuntime.peakForceScaledN);
+
+        float fxRear = computeLongitudinalForce(car, input.throttle, forwardSpeed, speedAbs, speedMult) * forceScale;
+        // Traction control: cut drive when the rear is overslipping. Fires when going straight
+        // (anti wheel-spin off the line) OR whenever surface mu is below road (e.g. on grass)
+        // so the back doesn't fish-tail just because the player taps gas off-road.
+        boolean rearOverslipping = Math.abs(alphaRear) > car.rearPeakSlipAngle * 1.35f;
+        boolean lowMuSurface = car.surfaceMu < (car.surfaceMuRoad - 0.15f);
+        if (input.throttle > 0f && rearOverslipping && (straightMode || lowMuSurface)) {
+            fxRear *= car.tractionControlStrength;
+        }
+        fxRear += computeDragAndRolling(car, forwardSpeed, speedAbs, speedMult) * forceScale;
+
+        applyLateralForceAtAxle(body, frontAxlePos, steerRad, fyFront, forwardDir, force, wheelForward, wheelLateral);
+        applyLateralForceAtAxle(body, rearAxlePos, 0f, fyRear, forwardDir, force, wheelForward, wheelLateral);
+
+        force.set(forwardDir).scl(fxRear);
+        body.applyForce(force, rearAxlePos, true);
+
+        if (speedAbs < car.steeringYawAssistMaxSpeed) {
+            applySteeringYawAssist(body, car, input.steering, forwardSpeed, speedAbs, speedMult, forceScale);
         }
 
-        body.applyLinearImpulse(impulse, body.getWorldCenter(), true);
+        float latDamp = straightMode ? car.stabilityLateralDamping : car.turningLateralDamping;
+        force.set(lateralDir).scl(-lateralSpeed * latDamp * forceScale);
+        body.applyForceToCenter(force, true);
+
+        applyAlignmentAssist(body, car, input, forwardSpeed, lateralSpeed, omega, chassisSpeed, forceScale);
+
+        applySpinDamping(body, car, omega, chassisSpeed, forceScale, isTurning);
+
+        updateRearSkidState(car, chassisSpeed, input);
     }
 
     /**
-     * Applies subtle forward drag to naturally slow the car.
-     * This works alongside Box2D's linearDamping for a natural feel.
+     * Standard bicycle-model slip at an axle (rad).
+     * alpha = atan2(v_lat + L*omega, v_long) in body frame; L is axle distance from CG (+front, -rear).
      */
-    private void applyForwardDrag(Body body, float forwardSpeed, CarComponent car) {
-        float dragMagnitude = -forwardSpeed * 0.5f; // Subtle extra drag
-        forceVec.set(forwardDir).scl(dragMagnitude);
-        body.applyForceToCenter(forceVec, true);
+    private static void applyTurnLoadTransfer(float[] frontRearLoad, float steerInput, CarComponent car) {
+        if (Math.abs(steerInput) < 0.01f) return;
+        float transfer = car.mass * PacejkaTireModel.GRAVITY * car.turnLoadTransfer * Math.abs(steerInput);
+        frontRearLoad[0] += transfer;
+        frontRearLoad[1] = Math.max(frontRearLoad[1] - transfer, frontRearLoad[1] * 0.5f);
+    }
+
+    static float computeBicycleSlipAngle(float vLong, float vLat, float omega, float axleOffset,
+                                         float steerRad, CarComponent car) {
+        // Rigid-body kinematics: v_axle = v_CG + omega x r.
+        // For r = (0, axleOffset) in body frame, v_axle_x = v_CG_x - omega * axleOffset.
+        float vLongWheel = vLong;
+        float vLatWheel = vLat - omega * axleOffset;
+
+        if (steerRad != 0f) {
+            // Express body-frame velocity in wheel frame rotated CCW by +steerRad: apply R(-steerRad).
+            float cos = MathUtils.cos(steerRad);
+            float sin = MathUtils.sin(steerRad);
+            float vLw = vLongWheel * cos - vLatWheel * sin;
+            float vTw = vLongWheel * sin + vLatWheel * cos;
+            vLongWheel = vLw;
+            vLatWheel = vTw;
+        }
+
+        float chassisSpeed = (float) Math.sqrt(vLong * vLong + vLat * vLat);
+        if (chassisSpeed < car.minChassisSpeedForSlip) {
+            return 0f;
+        }
+
+        float denom = Math.max(Math.abs(vLongWheel), car.minLongitudinalSpeedForSlip);
+        if (Math.abs(vLongWheel) < car.minLongitudinalSpeedForSlip) {
+            denom = car.minLongitudinalSpeedForSlip;
+        }
+
+        float alpha = MathUtils.atan2(vLatWheel, Math.copySign(denom, vLongWheel == 0f ? 1f : vLongWheel));
+
+        float fade = MathUtils.clamp(chassisSpeed / Math.max(car.lowSpeedGripFadeSpeed, 0.1f), 0f, 1f);
+        return alpha * fade;
+    }
+
+    private static float computeGripScale(float chassisSpeed, CarComponent car) {
+        float speedGrip = MathUtils.clamp(chassisSpeed / Math.max(car.pacejkaMinSpeedForGrip, 0.1f), 0f, 1f);
+        float chassisGrip = MathUtils.clamp(chassisSpeed / Math.max(car.pacejkaChassisSpeedRef, 0.1f), 0f, 1f);
+        return speedGrip * chassisGrip;
+    }
+
+    /** Light yaw torque so keyboard steering works at low speed (Pacejka alone cannot turn in place). */
+    private static void applySteeringYawAssist(Body body, CarComponent car, float steeringInput,
+                                               float forwardSpeed, float speedAbs, float speedMult,
+                                               float forceScale) {
+        if (Math.abs(steeringInput) < 0.01f) return;
+
+        float speedFrac = MathUtils.clamp(speedAbs / Math.max(car.steeringYawAssistMaxSpeed, 0.5f), 0f, 1f);
+        float steerRad = car.currentSteeringAngle * MathUtils.degreesToRadians;
+        if (forwardSpeed < -0.5f) {
+            steerRad = -steerRad;
+        }
+
+        float torque = steerRad * car.steeringYawTorqueGain * speedFrac * forceScale;
+        body.applyTorque(torque, true);
+    }
+
+    private static void applySpinDamping(Body body, CarComponent car, float omega, float chassisSpeed,
+                                         float forceScale, boolean isTurning) {
+        float absOmega = Math.abs(omega);
+        if (absOmega < 0.1f) return;
+
+        float omegaFactor = MathUtils.clamp((absOmega - car.spinDampingOmegaStart * 0.4f)
+                / Math.max(car.spinDampingOmegaStart, 0.1f), 0f, 1f);
+        float speedFactor = MathUtils.clamp(chassisSpeed / Math.max(car.pacejkaChassisSpeedRef, 0.1f), 0.3f, 1f);
+        // Lighter damping while turning so the player's yaw input survives; full damping is reserved
+        // for runaway spin when the player is not steering.
+        float damp = car.spinAngularDamping * (isTurning ? 0.6f : 1f);
+
+        body.applyTorque(-omega * damp * omegaFactor * speedFactor * forceScale, true);
     }
 
     /**
-     * Applies steering rotation based on current speed.
-     * At low speed: wide steering angle for tight turns.
-     * At high speed: narrow angle for stability.
-     * The angle interpolates smoothly for natural feel.
+     * Simcade recovery assist: torque pulls chassis heading toward velocity heading whenever the
+     * driver is "asking the car to recover" — no throttle, no steer, OR active counter-steer.
+     * Counter-steer also gets a yaw-rate damper, so a correct kontra both rotates the wheel fast
+     * (see updateSteering) and bleeds off the remaining spin.
      */
-    private void applySteering(Body body, CarComponent car, float steeringInput,
-                               float forwardSpeed, float deltaTime) {
-        float absSpeed = Math.abs(forwardSpeed);
-        float maxSpeed = car.maxForwardSpeed;
+    private static void applyAlignmentAssist(Body body, CarComponent car, InputComponent input,
+                                              float forwardSpeed, float lateralSpeed, float omega,
+                                              float chassisSpeed, float forceScale) {
+        if (chassisSpeed < car.alignmentAssistMinSpeed) return;
 
-        // Interpolate steering angle based on speed ratio
-        float speedFraction = MathUtils.clamp(absSpeed / maxSpeed, 0f, 1f);
-        float targetAngleDeg = MathUtils.lerp(car.maxSteeringAngle, car.minSteeringAngle, speedFraction);
+        boolean noSteer = Math.abs(input.steering) < 0.01f;
+        boolean counterSteer = forwardSpeed > 0.5f && isCounterSteering(input.steering, omega, car);
+        boolean noThrottle = Math.abs(input.throttle) < 0.05f;
 
-        // Smooth steering interpolation
-        float desiredAngle = steeringInput * targetAngleDeg;
-        car.currentSteeringAngle = MathUtils.lerp(car.currentSteeringAngle, desiredAngle,
-                car.steeringSpeed * deltaTime);
+        // Driver still pushing hard into the slide (steer + throttle, no kontra) → leave them alone.
+        if (!noSteer && !counterSteer && !noThrottle) return;
 
-        // Only apply steering when moving (prevents spinning in place)
-        if (absSpeed > 0.5f) {
-            float angularVelocity = car.currentSteeringAngle * MathUtils.degreesToRadians;
-            // Reverse steering direction when moving backward
-            if (forwardSpeed < 0) {
-                angularVelocity = -angularVelocity;
-            }
-            body.setAngularVelocity(angularVelocity * (absSpeed / maxSpeed + 0.3f) * 3f);
-        } else {
-            body.setAngularVelocity(0);
+        float beta = MathUtils.atan2(lateralSpeed, Math.max(Math.abs(forwardSpeed), 1.5f));
+        float speedWeight = MathUtils.clamp(
+                chassisSpeed / Math.max(car.alignmentAssistMinSpeed * 2f, 0.5f), 0f, 1f);
+
+        float strength = car.alignmentAssistStrength;
+        if (counterSteer) {
+            strength *= car.counterSteerAlignmentBoost;
+        } else if (!noSteer) {
+            // Throttle off but still steering — light help only, don't fight the driver.
+            strength *= 0.5f;
+        }
+
+        body.applyTorque(-beta * strength * speedWeight * forceScale, true);
+
+        if (noSteer || counterSteer) {
+            body.applyTorque(-omega * car.idleYawDamping * speedWeight * forceScale, true);
         }
     }
 
-    /**
-     * Applies forward/backward drive force based on throttle input.
-     * Respects max speed limits in both directions.
-     */
-    private void applyDriveForce(Body body, CarComponent car, float throttle, float forwardSpeed) {
-        if (throttle == 0f) return;
+    private static PacejkaTireModel.AxleConfig buildFrontConfig(CarComponent car) {
+        PacejkaTireModel.AxleConfig cfg = new PacejkaTireModel.AxleConfig();
+        cfg.B = car.pacejkaFrontB;
+        cfg.C = car.pacejkaFrontC;
+        cfg.D = car.pacejkaFrontD;
+        cfg.E = car.pacejkaFrontE;
+        cfg.isFront = true;
+        cfg.slideFalloffMin = car.slideForceFalloffMinFront;
+        cfg.peakSlipAngle = car.frontPeakSlipAngle = PacejkaTireModel.estimatePeakSlipAngle(
+                cfg.B, cfg.C, cfg.D, cfg.E);
+        return cfg;
+    }
 
-        float force;
+    private static PacejkaTireModel.AxleConfig buildRearConfig(CarComponent car) {
+        PacejkaTireModel.AxleConfig cfg = new PacejkaTireModel.AxleConfig();
+        cfg.B = car.pacejkaRearB;
+        cfg.C = car.pacejkaRearC;
+        cfg.D = car.pacejkaRearD;
+        cfg.E = car.pacejkaRearE;
+        cfg.isFront = false;
+        cfg.slideFalloffMin = car.slideForceFalloffMinRear;
+        cfg.peakSlipAngle = car.rearPeakSlipAngle = PacejkaTireModel.estimatePeakSlipAngle(
+                cfg.B, cfg.C, cfg.D, cfg.E);
+        return cfg;
+    }
+
+    private static float evaluateAxleForce(CarComponent car, PacejkaTireModel.AxleConfig cfg,
+                                           PacejkaTireModel.AxleRuntime rt, float alphaRaw, float alphaEff,
+                                           float normalLoad, float refLoad, float gripScale, float forceScale,
+                                           float mu, float extraGrip, float handbrakeMult) {
+        rt.alphaRaw = alphaRaw;
+        rt.alphaEffective = alphaEff;
+        rt.normalLoadN = normalLoad;
+        rt.mu = mu;
+        rt.loadScale = PacejkaTireModel.computeLoadScale(normalLoad, refLoad);
+        rt.gripScale = gripScale;
+        rt.extraGripMult = extraGrip * handbrakeMult;
+        rt.lowSpeedFade = 1f;
+        rt.slideMult = PacejkaTireModel.slideForceFalloff(Math.abs(alphaEff), cfg.peakSlipAngle,
+                car.pacejkaMaxSlipAngle, cfg.slideFalloffMin);
+
+        float fy = PacejkaTireModel.computeAppliedFy(alphaEff, cfg, rt, forceScale);
+
+        rt.peakForceScaledN = computePeakForceN(cfg, rt, forceScale);
+
+        return fy;
+    }
+
+    private static float computePeakForceN(PacejkaTireModel.AxleConfig cfg,
+                                            PacejkaTireModel.AxleRuntime rt, float forceScale) {
+        PacejkaTireModel.AxleRuntime peakRt = new PacejkaTireModel.AxleRuntime();
+        peakRt.mu = rt.mu;
+        peakRt.loadScale = rt.loadScale;
+        peakRt.gripScale = rt.gripScale;
+        peakRt.extraGripMult = rt.extraGripMult;
+        peakRt.lowSpeedFade = rt.lowSpeedFade;
+        peakRt.slideMult = 1f;
+        return Math.abs(PacejkaTireModel.curveFyAtSlip(cfg.peakSlipAngle, cfg, peakRt, forceScale));
+    }
+
+    private static void updateRearSkidState(CarComponent car, float chassisSpeed, InputComponent input) {
+        float absSlip = Math.abs(car.rearSlipAngleEffective);
+        float peak = car.rearPeakSlipAngle * car.rearSkidPastPeakMultiplier;
+        boolean pastPeak = absSlip > peak;
+        boolean straight = absSlip < car.rearSkidSlipStraightThreshold;
+        boolean fastEnough = chassisSpeed >= car.rearSkidMinSpeed;
+        boolean intentionalDrift = Math.abs(input.steering) > 0.01f || input.braking;
+
+        if (straight || !fastEnough || !intentionalDrift) {
+            car.rearSkidActive = false;
+            car.rearLeftSkidActive = false;
+            car.rearRightSkidActive = false;
+            return;
+        }
+
+        car.rearSkidActive = pastPeak;
+        car.rearLeftSkidActive = pastPeak;
+        car.rearRightSkidActive = pastPeak;
+    }
+
+    static float pacejkaLateralForce(float alpha, float B, float C, float D, float E) {
+        return PacejkaTireModel.magicFormulaForce(alpha, B, C, D, E);
+    }
+
+    private void updateSteering(CarComponent car, InputComponent input, float forwardSpeed,
+                                 float speedAbs, float speedMult, float omega, float deltaTime) {
+        // Snap-to-zero when essentially stopped so we don't carry residual lock into a direction change.
+        if (speedAbs < MIN_SPEED_FOR_STEER * 0.3f && Math.abs(input.steering) < 0.01f) {
+            car.currentSteeringAngle = 0f;
+            return;
+        }
+
+        float maxSpeed = car.maxForwardSpeed * speedMult;
+        float speedFraction = MathUtils.clamp(speedAbs / Math.max(maxSpeed, 0.1f), 0f, 1f);
+        float maxAngle = MathUtils.lerp(car.maxSteeringAngle, car.minSteeringAngle, speedFraction);
+
+        float targetAngle = input.steering * maxAngle;
+        if (speedAbs < MIN_SPEED_FOR_STEER) {
+            targetAngle *= MathUtils.clamp(speedAbs / MIN_SPEED_FOR_STEER, 0f, 1f);
+        }
+
+        boolean holdingSteer = Math.abs(input.steering) > 0.01f;
+        float rate = holdingSteer ? car.steeringSpeed : car.steeringReturnSpeed;
+
+        // Counter-steer assist: when going forward AND the player flicks steer OPPOSITE to the
+        // current yaw direction (and the car is actually spinning), the wheel snaps over fast.
+        // This is the keyboard counterpart of a quick wrist flick on a wheel.
+        if (holdingSteer && forwardSpeed > 0.5f && isCounterSteering(input.steering, omega, car)) {
+            rate *= car.counterSteerSpeedMultiplier;
+        }
+
+        car.currentSteeringAngle = moveToward(car.currentSteeringAngle, targetAngle, rate * deltaTime);
+    }
+
+    private static boolean isCounterSteering(float steerInput, float omega, CarComponent car) {
+        return Math.abs(omega) > car.counterSteerYawThreshold && steerInput * omega < 0f;
+    }
+
+    private static float moveToward(float current, float target, float maxDelta) {
+        if (current < target) {
+            return Math.min(current + maxDelta, target);
+        }
+        return Math.max(current - maxDelta, target);
+    }
+
+    private static void applyLateralForceAtAxle(Body body, Vector2 axlePos, float steerRad, float fy,
+                                                Vector2 bodyForward, Vector2 forceOut,
+                                                Vector2 wheelFwd, Vector2 wheelLat) {
+        wheelFwd.set(bodyForward);
+        if (steerRad != 0f) {
+            float cos = MathUtils.cos(steerRad);
+            float sin = MathUtils.sin(steerRad);
+            float fx = wheelFwd.x * cos - wheelFwd.y * sin;
+            float fyDir = wheelFwd.x * sin + wheelFwd.y * cos;
+            wheelFwd.set(fx, fyDir);
+        }
+        wheelLat.set(-wheelFwd.y, wheelFwd.x);
+        forceOut.set(wheelLat).scl(fy);
+        body.applyForce(forceOut, axlePos, true);
+    }
+
+    private static float computeLongitudinalForce(CarComponent car, float throttle, float forwardSpeed,
+                                                  float speedAbs, float speedMult) {
+        if (throttle == 0f) return 0f;
+
+        float maxForward = car.maxForwardSpeed * speedMult;
+        float maxBackward = car.maxBackwardSpeed * speedMult;
+        float engine = car.engineForce * car.engineForceMultiplier;
+
         if (throttle > 0f) {
-            // Forward — check max speed
-            if (forwardSpeed < car.maxForwardSpeed) {
-                force = car.driveForce * throttle;
-            } else {
-                return; // Already at max speed
-            }
-        } else {
-            // Reverse / braking
-            if (forwardSpeed > 0.5f) {
-                // Moving forward + pressing S = braking (stronger force)
-                force = -car.brakeForce;
-            } else if (forwardSpeed > -car.maxBackwardSpeed) {
-                // Already stopped or reversing — apply reverse drive
-                force = car.driveForce * throttle;
-            } else {
-                return; // At max reverse speed
-            }
+            if (forwardSpeed >= maxForward) return 0f;
+            return engine * throttle;
         }
 
-        forceVec.set(forwardDir).scl(force);
-        body.applyForceToCenter(forceVec, true);
+        if (forwardSpeed > 0.5f) {
+            return -car.brakeForce;
+        }
+        if (forwardSpeed > -maxBackward) {
+            return engine * throttle;
+        }
+        return 0f;
+    }
+
+    private static float computeDragAndRolling(CarComponent car, float forwardSpeed, float speedAbs, float speedMult) {
+        float drag = -car.aerodynamicDragCoeff * speedAbs * speedAbs;
+
+        float highStart = car.highSpeedDragStart * speedMult;
+        if (speedAbs > highStart) {
+            float excess = speedAbs - highStart;
+            drag -= car.highSpeedDragCoeff * excess * excess;
+        }
+
+        if (forwardSpeed < 0f) {
+            drag = -drag;
+        }
+
+        float rolling = 0f;
+        if (speedAbs > 0.1f) {
+            rolling = -car.rollingResistance * Math.signum(forwardSpeed);
+        }
+        return drag + rolling;
     }
 }

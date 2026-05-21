@@ -23,6 +23,18 @@ public class TerrainComponent implements Component {
     /** Original max forward speed (captured from CarComponent at init). */
     public float defaultMaxForwardSpeed = 80f;
 
-    /** Original drive force (captured from CarComponent at init). */
-    public float defaultDriveForce = 60f;
+    /** Original engine force (captured from CarComponent at init). */
+    public float defaultEngineForce = 60f;
+
+    /** Original rolling resistance (captured from CarComponent at init). */
+    public float defaultRollingResistance = 0.25f;
+
+    /** Original aero drag coefficient (captured from CarComponent at init). */
+    public float defaultAeroDragCoeff = 0.005f;
+
+    /** Original Box2D linear damping (captured from CarComponent at init). */
+    public float defaultLinearDamping = 0.1f;
+
+    /** Original Box2D angular damping (captured from CarComponent at init). */
+    public float defaultAngularDamping = 3.0f;
 }

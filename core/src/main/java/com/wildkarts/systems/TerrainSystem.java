@@ -11,23 +11,17 @@ import com.wildkarts.components.TerrainComponent;
 import com.wildkarts.track.TrackGenerator;
 
 /**
- * Checks what terrain tile each entity is standing on and adjusts
- * CarComponent speed parameters accordingly.
+ * Resolves the surface under each car each frame and writes the appropriate
+ * physics modifiers (mu, max speed, engine force, rolling resistance, aero drag)
+ * onto its CarComponent.
  *
- * Must run BEFORE MovementSystem so that speed limits are current
- * when drive force is applied.
+ * Must run BEFORE MovementSystem so the modified values are picked up the
+ * same physics step the car crosses a tile boundary.
  *
- * On GRASS: maxForwardSpeed and driveForce are drastically reduced,
- * simulating off-track penalty.
- * On ROAD: values are restored to defaults.
+ * All tuning is driven by fields on CarComponent ({@code grass*Multiplier},
+ * {@code surfaceMu*}) so the balance is editable in one place.
  */
 public class TerrainSystem extends IteratingSystem {
-
-    /** Speed limit on grass (m/s). Normal road speed is ~80. */
-    private static final float GRASS_MAX_SPEED = 15f;
-
-    /** Drive force on grass (N). Normal road force is ~60. */
-    private static final float GRASS_DRIVE_FORCE = 20f;
 
     private final ComponentMapper<TerrainComponent> terrainMapper =
             ComponentMapper.getFor(TerrainComponent.class);
@@ -48,17 +42,39 @@ public class TerrainSystem extends IteratingSystem {
 
         if (physics.body == null || terrain.trackGenerator == null) return;
 
-        // Look up the tile under the car
         Vector2 pos = physics.body.getPosition();
         terrain.currentTile = terrain.trackGenerator.getTileAt(pos.x, pos.y);
 
-        // Adjust speed based on terrain
         if (terrain.currentTile == TrackGenerator.TILE_ROAD) {
-            car.maxForwardSpeed = terrain.defaultMaxForwardSpeed;
-            car.driveForce = terrain.defaultDriveForce;
+            applyRoadSurface(car, physics, terrain);
         } else {
-            car.maxForwardSpeed = GRASS_MAX_SPEED;
-            car.driveForce = GRASS_DRIVE_FORCE;
+            applyOffRoadSurface(car, physics, terrain);
         }
+    }
+
+    /** Restores all physics knobs to their spawn-time defaults. */
+    private static void applyRoadSurface(CarComponent car, PhysicsComponent physics, TerrainComponent terrain) {
+        car.maxForwardSpeed = terrain.defaultMaxForwardSpeed;
+        car.engineForce = terrain.defaultEngineForce;
+        car.rollingResistance = terrain.defaultRollingResistance;
+        car.aerodynamicDragCoeff = terrain.defaultAeroDragCoeff;
+        car.surfaceMu = car.surfaceMuRoad;
+        physics.body.setLinearDamping(terrain.defaultLinearDamping);
+        physics.body.setAngularDamping(terrain.defaultAngularDamping);
+    }
+
+    /**
+     * Soft "bog down" profile: reduced top speed and torque so the wheels don't just spin in place,
+     * higher rolling/aero/Box2D damping for smooth bleed-off, much higher angular damping so the
+     * car can't just keep spinning sideways forever once it leaves the track.
+     */
+    private static void applyOffRoadSurface(CarComponent car, PhysicsComponent physics, TerrainComponent terrain) {
+        car.maxForwardSpeed = terrain.defaultMaxForwardSpeed * car.grassMaxSpeedMultiplier;
+        car.engineForce = terrain.defaultEngineForce * car.grassEngineMultiplier;
+        car.rollingResistance = terrain.defaultRollingResistance * car.grassRollingResistanceMultiplier;
+        car.aerodynamicDragCoeff = terrain.defaultAeroDragCoeff + car.grassAeroDragBonus;
+        car.surfaceMu = car.surfaceMuGrass;
+        physics.body.setLinearDamping(terrain.defaultLinearDamping * car.grassLinearDampingMultiplier);
+        physics.body.setAngularDamping(terrain.defaultAngularDamping * car.grassAngularDampingMultiplier);
     }
 }

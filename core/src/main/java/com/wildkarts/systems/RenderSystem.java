@@ -29,7 +29,7 @@ public class RenderSystem extends IteratingSystem {
     private final OrthographicCamera camera;
     private final World world;
     private final PhysicsSystem physicsSystem;
-    private boolean debugDraw = true;
+    private boolean debugDraw = false;
 
     // Car color scheme
     private static final Color CAR_BODY_COLOR = new Color(0.2f, 0.6f, 1.0f, 1.0f);
@@ -79,7 +79,7 @@ public class RenderSystem extends IteratingSystem {
 
         float alpha = physicsSystem != null ? physicsSystem.getInterpolationAlpha() : 1f;
 
-        // Visual interpolation between previous and current physics state
+        // Visual interpolation between previous and current physics state (needed for multiplayer)
         Vector2 pos = new Vector2(physics.prevPosition).lerp(body.getPosition(), alpha);
         
         // Shortest path angle interpolation
@@ -93,9 +93,9 @@ public class RenderSystem extends IteratingSystem {
         float hw = physics.widthMeters / 2f;
         float hh = physics.heightMeters / 2f;
 
-        // Check if drifting (lateral velocity > threshold)
-        float lateralSpeed = getLateralSpeed(body, angle);
-        boolean isDrifting = Math.abs(lateralSpeed) > 1.5f;
+        boolean isDrifting = car != null
+                ? Math.abs(car.rearSlipAngle) > 0.12f || Math.abs(car.frontSlipAngle) > 0.12f
+                : Math.abs(getLateralSpeed(body, angle)) > 1.5f;
 
         // Draw car body as a rotated rectangle
         Color bodyColor = isDrifting ? CAR_DRIFT_COLOR : CAR_BODY_COLOR;
