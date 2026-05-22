@@ -147,6 +147,11 @@ public class GameScreen extends ScreenAdapter {
     private TextButton readyButton;
     private Label lobbyStatusLabel;
 
+    // Escape menu overlay
+    private boolean isEscapeMenuOpen = false;
+    private Stage escapeMenuStage;
+    private Table escapeMenuPanel;
+
     // --- Car factory (kept for potential respawn) ---
     private CarFactory carFactory;
 
@@ -800,6 +805,76 @@ public class GameScreen extends ScreenAdapter {
         // Hidden by default — toggled in render() based on race state.
         lobbyPanel.setVisible(false);
         playStage.addActor(lobbyPanel);
+
+        setupEscapeMenuUI();
+    }
+
+    private void setupEscapeMenuUI() {
+        escapeMenuStage = new Stage(new ScreenViewport());
+
+        escapeMenuPanel = new Table();
+        escapeMenuPanel.setFillParent(true);
+        escapeMenuPanel.center();
+
+        Label title = new Label("MENU", uiSkin);
+        title.setFontScale(1.8f);
+        title.setAlignment(Align.center);
+
+        TextButton resumeButton = new TextButton("Wznow", uiSkin);
+        resumeButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                closeEscapeMenu();
+            }
+        });
+
+        TextButton exitButton = new TextButton("Wyjdz do menu", uiSkin);
+        exitButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                exitToMainMenu();
+            }
+        });
+
+        escapeMenuPanel.add(title).padBottom(30f).row();
+        escapeMenuPanel.add(resumeButton).width(220f).height(50f).padBottom(15f).row();
+        escapeMenuPanel.add(exitButton).width(220f).height(50f);
+
+        escapeMenuStage.addActor(escapeMenuPanel);
+    }
+
+    private void toggleEscapeMenu() {
+        if (isEscapeMenuOpen) {
+            closeEscapeMenu();
+        } else {
+            openEscapeMenu();
+        }
+    }
+
+    private void openEscapeMenu() {
+        isEscapeMenuOpen = true;
+        inputSystem.externalInputBlocked = true;
+        Gdx.input.setInputProcessor(escapeMenuStage);
+        Gdx.input.setCursorCatched(false);
+    }
+
+    private void closeEscapeMenu() {
+        isEscapeMenuOpen = false;
+        inputSystem.externalInputBlocked = false;
+        Gdx.input.setInputProcessor(playStage);
+    }
+
+    private void exitToMainMenu() {
+        isEscapeMenuOpen = false;
+        inputSystem.externalInputBlocked = false;
+
+        if (gameClient != null) {
+            gameClient.dispose();
+            game.setGameClient(null);
+        }
+
+        game.setScreen(new MainMenuScreen(game));
+        dispose();
     }
 
     /**
@@ -864,9 +939,17 @@ public class GameScreen extends ScreenAdapter {
             lobbyPanel.setVisible(false);
         }
 
-        // Handle ESC to go back to editor
-        if (currentState == GameState.PLAYING && !isMultiplayerMode && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
-            transitionToEditing();
+        // Handle ESC key
+        if (currentState == GameState.PLAYING && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            if (isMultiplayerMode) {
+                toggleEscapeMenu();
+            } else {
+                if (isEscapeMenuOpen) {
+                    closeEscapeMenu();
+                } else {
+                    transitionToEditing();
+                }
+            }
         }
 
         // Toggle debug draw with F1 (driving mode only)
@@ -907,6 +990,10 @@ public class GameScreen extends ScreenAdapter {
             case PLAYING -> {
                 playStage.act(delta);
                 playStage.draw();
+                if (isEscapeMenuOpen) {
+                    escapeMenuStage.act(delta);
+                    escapeMenuStage.draw();
+                }
             }
         }
 
@@ -986,6 +1073,9 @@ public class GameScreen extends ScreenAdapter {
         if (playStage != null) {
             playStage.getViewport().update(width, height, true);
         }
+        if (escapeMenuStage != null) {
+            escapeMenuStage.getViewport().update(width, height, true);
+        }
         if (carDebugRenderSystem != null) {
             carDebugRenderSystem.resize(width, height);
         }
@@ -1009,6 +1099,7 @@ public class GameScreen extends ScreenAdapter {
         if (editorStage != null) editorStage.dispose();
         if (loadingStage != null) loadingStage.dispose();
         if (playStage != null) playStage.dispose();
+        if (escapeMenuStage != null) escapeMenuStage.dispose();
         if (uiFont != null) uiFont.dispose();
     }
 }

@@ -28,6 +28,9 @@ public class InputSystem extends IteratingSystem {
 
     private ImmutableArray<Entity> raceEntities;
 
+    /** Set by GameScreen to block all kart input when an overlay menu is open. */
+    public boolean externalInputBlocked = false;
+
     public InputSystem() {
         super(Family.all(InputComponent.class).get());
     }
@@ -48,7 +51,7 @@ public class InputSystem extends IteratingSystem {
     protected void processEntity(Entity entity, float deltaTime) {
         InputComponent input = inputMapper.get(entity);
 
-        if (isRaceInputBlocked()) {
+        if (isRaceInputBlocked() || externalInputBlocked) {
             input.throttle = 0f;
             input.steering = 0f;
             input.braking = false;
