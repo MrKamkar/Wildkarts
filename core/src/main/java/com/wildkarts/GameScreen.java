@@ -47,6 +47,7 @@ import com.wildkarts.net.packets.MapReadyPacket;
 import com.wildkarts.net.packets.PlayerPositionPacket;
 import com.wildkarts.net.packets.PlayerReadyPacket;
 import com.wildkarts.systems.CarDebugRenderSystem;
+import com.wildkarts.systems.HudRenderSystem;
 import com.wildkarts.systems.InputSystem;
 import com.wildkarts.systems.LapSectorSystem;
 import com.wildkarts.systems.MovementSystem;
@@ -116,6 +117,7 @@ public class GameScreen extends ScreenAdapter {
     private RenderSystem renderSystem;
     private SkidmarkSystem skidmarkSystem;
     private CarDebugRenderSystem carDebugRenderSystem;
+    private HudRenderSystem hudRenderSystem;
     private PhysicsSystem physicsSystem;
 
     // Race manager entity (singleton, carries RaceComponent)
@@ -208,6 +210,9 @@ public class GameScreen extends ScreenAdapter {
         carDebugRenderSystem = new CarDebugRenderSystem(camera);
         carDebugRenderSystem.priority = 6;
 
+        hudRenderSystem = new HudRenderSystem();
+        hudRenderSystem.priority = 7;
+
         engine.addSystem(raceStateSystem);
         engine.addSystem(inputSystem);
         engine.addSystem(terrainSystem);
@@ -224,6 +229,7 @@ public class GameScreen extends ScreenAdapter {
         engine.addSystem(skidmarkSystem);
         engine.addSystem(renderSystem);
         engine.addSystem(carDebugRenderSystem);
+        engine.addSystem(hudRenderSystem);
 
         // --- Setup UI ---
         uiFont = new BitmapFont();
@@ -983,6 +989,9 @@ public class GameScreen extends ScreenAdapter {
         if (carDebugRenderSystem != null) {
             carDebugRenderSystem.resize(width, height);
         }
+        if (hudRenderSystem != null) {
+            hudRenderSystem.resize(width, height);
+        }
         if (loadingStage != null) {
             loadingStage.getViewport().update(width, height, true);
         }
@@ -993,6 +1002,7 @@ public class GameScreen extends ScreenAdapter {
         renderSystem.dispose();
         if (skidmarkSystem != null) skidmarkSystem.dispose();
         if (carDebugRenderSystem != null) carDebugRenderSystem.dispose();
+        if (hudRenderSystem != null) hudRenderSystem.dispose();
         trackRenderer.dispose();
         world.dispose();
 
