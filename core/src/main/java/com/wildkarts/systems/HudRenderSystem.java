@@ -62,6 +62,9 @@ public class HudRenderSystem extends EntitySystem {
     private float goDisplayTimer = 0f;
     private RaceState previousState = RaceState.WAITING_FOR_PLAYERS;
 
+    /** Set by GameScreen to suppress the FINISHED banner when results overlay is shown. */
+    public boolean suppressFinishedBanner = false;
+
     public HudRenderSystem() {
         super();
         hudViewport = new ScreenViewport();
@@ -201,8 +204,8 @@ public class HudRenderSystem extends EntitySystem {
             font.setColor(Color.WHITE);
         }
 
-        // Finished banner
-        if (race.currentState == RaceState.FINISHED) {
+        // Finished banner (hidden when results overlay is displayed)
+        if (race.currentState == RaceState.FINISHED && !suppressFinishedBanner) {
             String finText = "RACE FINISHED!";
             countdownFont.setColor(Color.GOLD);
             layout.setText(countdownFont, finText);

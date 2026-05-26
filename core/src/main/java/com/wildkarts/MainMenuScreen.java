@@ -87,6 +87,10 @@ public class MainMenuScreen implements Screen {
         titleStyle.fontColor = Color.GOLD;
         Label titleLabel = new Label("WILDKARTS", titleStyle);
 
+        // --- Nick Input Field ---
+        TextField nickField = new TextField("", textFieldStyle);
+        nickField.setMessageText("Gracz123");
+
         // --- IP Input Field ---
         TextField ipField = new TextField("localhost", textFieldStyle);
 
@@ -115,6 +119,9 @@ public class MainMenuScreen implements Screen {
                 connectButton.setDisabled(true);
                 
                 GameClient client = new GameClient();
+                String nick = nickField.getText().trim();
+                if (nick.isEmpty()) nick = nickField.getMessageText();
+                client.playerName = nick;
                 ((WildKartsGame) game).setGameClient(client);
                 
                 client.onJoinAccepted = () -> {
@@ -153,6 +160,7 @@ public class MainMenuScreen implements Screen {
 
         table.add(titleLabel).padBottom(40f).row();
         table.add(singlePlayerButton).width(250f).height(60f).padBottom(30f).row();
+        table.add(nickField).width(250f).height(40f).padBottom(10f).row();
         table.add(ipField).width(250f).height(40f).padBottom(10f).row();
         table.add(connectButton).width(250f).height(50f).padBottom(10f).row();
         table.add(statusLabel).padBottom(20f).row();

@@ -11,6 +11,7 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.Texture.TextureWrap;
@@ -153,6 +154,12 @@ public class GameScreen extends ScreenAdapter {
     private boolean isEscapeMenuOpen = false;
     private Stage escapeMenuStage;
     private Table escapeMenuPanel;
+
+    // Race results overlay
+    private boolean isResultsScreenOpen = false;
+    private Stage resultsStage;
+    private Table resultsPanel;
+    private ShapeRenderer overlayRenderer;
 
     // --- Car factory (kept for potential respawn) ---
     private CarFactory carFactory;
@@ -658,6 +665,12 @@ public class GameScreen extends ScreenAdapter {
                 }
             }
         };
+
+        gameClient.onRaceResults = packet -> {
+            if (packet.playerIds == null) return;
+            Gdx.app.log("GameScreen", "Race results received — showing leaderboard.");
+            showRaceResults(packet.playerIds, packet.playerNames, packet.finishTimes);
+        };
     }
 
     /** Resolves a player id to the local-player car or one of the remote-player cars. */
@@ -899,6 +912,67 @@ public class GameScreen extends ScreenAdapter {
         playStage.addActor(lobbyPanel);
 
         setupEscapeMenuUI();
+        setupResultsUI();
+    }
+
+    private void setupResultsUI() {
+        resultsStage = new Stage(new ScreenViewport());
+        overlayRenderer = new ShapeRenderer();
+        resultsPanel = new Table();
+        resultsPanel.setFillParent(true);
+        resultsPanel.center();
+        resultsStage.addActor(resultsPanel);
+    }
+
+    private void showRaceResults(int[] playerIds, String[] playerNames, float[] finishTimes) {
+        resultsPanel.clear();
+
+        Label title = new Label("WYNIKI WYSCIGU", uiSkin);
+        title.setFontScale(2f);
+        title.setAlignment(Align.center);
+        resultsPanel.add(title).padBottom(35f).expandX().center().colspan(3).row();
+
+        for (int i = 0; i < playerIds.length; i++) {
+            String place = (i + 1) + ". Miejsce";
+            String name = playerNames[i] != null ? playerNames[i] : "Player";
+            String time = finishTimes[i] > 0f ? formatRaceTime(finishTimes[i]) : "DNF";
+
+            Label placeLabel = new Label(place, uiSkin);
+            placeLabel.setFontScale(1.4f);
+            placeLabel.setAlignment(Align.right);
+            Label nameLabel = new Label(name, uiSkin);
+            nameLabel.setFontScale(1.4f);
+            nameLabel.setAlignment(Align.center);
+            Label timeLabel = new Label(time, uiSkin);
+            timeLabel.setFontScale(1.4f);
+            timeLabel.setAlignment(Align.left);
+
+            resultsPanel.add(placeLabel).width(140f).padRight(25f).padBottom(14f);
+            resultsPanel.add(nameLabel).width(160f).padRight(25f).padBottom(14f);
+            resultsPanel.add(timeLabel).width(120f).padBottom(14f);
+            resultsPanel.row();
+        }
+
+        TextButton returnButton = new TextButton("Wyjdz do menu", uiSkin);
+        returnButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                exitToMainMenu();
+            }
+        });
+        resultsPanel.add(returnButton).width(220f).height(50f).padTop(35f).colspan(3).center();
+
+        isResultsScreenOpen = true;
+        inputSystem.externalInputBlocked = true;
+        hudRenderSystem.suppressFinishedBanner = true;
+        Gdx.input.setInputProcessor(resultsStage);
+        Gdx.input.setCursorCatched(false);
+    }
+
+    private String formatRaceTime(float totalSeconds) {
+        int minutes = (int) (totalSeconds / 60f);
+        float secs = totalSeconds - minutes * 60f;
+        return String.format("%02d:%05.2f", minutes, secs);
     }
 
     private void setupEscapeMenuUI() {
@@ -958,6 +1032,7 @@ public class GameScreen extends ScreenAdapter {
 
     private void exitToMainMenu() {
         isEscapeMenuOpen = false;
+        isResultsScreenOpen = false;
         inputSystem.externalInputBlocked = false;
 
         if (gameClient != null) {
@@ -1029,12 +1104,22 @@ public class GameScreen extends ScreenAdapter {
                     && (race.currentState == RaceState.WAITING_FOR_PLAYERS
                         || race.currentState == RaceState.PRACTICE);
             lobbyPanel.setVisible(showLobby);
+
+            // Single-player: show results when race is FINISHED
+            if (!isMultiplayerMode && !isResultsScreenOpen && race != null
+                    && race.currentState == RaceState.FINISHED) {
+                showRaceResults(
+                        new int[]{1},
+                        new String[]{"Player"},
+                        new float[]{race.raceTimer});
+            }
         } else if (lobbyPanel != null) {
             lobbyPanel.setVisible(false);
         }
 
-        // Handle ESC key
-        if (currentState == GameState.PLAYING && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+        // Handle ESC key (blocked when results screen is shown)
+        if (currentState == GameState.PLAYING && !isResultsScreenOpen
+                && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
             if (isMultiplayerMode) {
                 toggleEscapeMenu();
             } else {
@@ -1084,7 +1169,17 @@ public class GameScreen extends ScreenAdapter {
             case PLAYING -> {
                 playStage.act(delta);
                 playStage.draw();
-                if (isEscapeMenuOpen) {
+                if (isResultsScreenOpen) {
+                    Gdx.gl.glEnable(GL20.GL_BLEND);
+                    Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+                    overlayRenderer.begin(ShapeRenderer.ShapeType.Filled);
+                    overlayRenderer.setColor(0f, 0f, 0f, 0.7f);
+                    overlayRenderer.rect(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    overlayRenderer.end();
+                    Gdx.gl.glDisable(GL20.GL_BLEND);
+                    resultsStage.act(delta);
+                    resultsStage.draw();
+                } else if (isEscapeMenuOpen) {
                     escapeMenuStage.act(delta);
                     escapeMenuStage.draw();
                 }
@@ -1170,6 +1265,9 @@ public class GameScreen extends ScreenAdapter {
         if (escapeMenuStage != null) {
             escapeMenuStage.getViewport().update(width, height, true);
         }
+        if (resultsStage != null) {
+            resultsStage.getViewport().update(width, height, true);
+        }
         if (carDebugRenderSystem != null) {
             carDebugRenderSystem.resize(width, height);
         }
@@ -1194,6 +1292,8 @@ public class GameScreen extends ScreenAdapter {
         if (loadingStage != null) loadingStage.dispose();
         if (playStage != null) playStage.dispose();
         if (escapeMenuStage != null) escapeMenuStage.dispose();
+        if (resultsStage != null) resultsStage.dispose();
+        if (overlayRenderer != null) overlayRenderer.dispose();
         if (uiFont != null) uiFont.dispose();
 
         if (carStraightTexture != null) carStraightTexture.dispose();

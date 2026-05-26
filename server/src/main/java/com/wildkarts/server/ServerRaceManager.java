@@ -14,6 +14,7 @@ import com.wildkarts.net.packets.LobbyStatusPacket;
 import com.wildkarts.net.packets.PlayerPassedPointPacket;
 import com.wildkarts.net.packets.PlayerReadyPacket;
 import com.wildkarts.net.packets.RacePositionsUpdatePacket;
+import com.wildkarts.net.packets.RaceResultsPacket;
 import com.wildkarts.net.packets.RaceStateChangedPacket;
 import com.wildkarts.net.packets.SectorTimePacket;
 import com.wildkarts.track.TrackGenerator;
@@ -84,6 +85,7 @@ public class ServerRaceManager {
         // Race position (assigned each tick)
         public int racePosition = 1;
         public float distanceToNextPointSq = Float.MAX_VALUE;
+        public float finishTime = 0f;
 
         public ServerPlayerState(int playerId, Connection connection) {
             this.playerId = playerId;
@@ -102,6 +104,7 @@ public class ServerRaceManager {
             }
             lastSectorDelta = 0f;
             finished = false;
+            finishTime = 0f;
             racePosition = 1;
             distanceToNextPointSq = Float.MAX_VALUE;
         }
@@ -183,7 +186,16 @@ public class ServerRaceManager {
         if (removed != null) {
             playersById.remove(removed.playerId);
             Gdx.app.log("ServerRaceManager", "Player " + removed.playerId + " left the race manager.");
-            broadcastLobbyStatus();
+
+            if (playersById.isEmpty()) {
+                resetToLobby();
+            } else {
+                broadcastLobbyStatus();
+                // If race is running and all remaining players finished, end it
+                if (raceState == RaceState.RACING && allPlayersFinished()) {
+                    transitionTo(RaceState.FINISHED);
+                }
+            }
         }
     }
 
@@ -392,6 +404,7 @@ public class ServerRaceManager {
 
             if (state.currentLap > MAX_LAPS) {
                 state.finished = true;
+                state.finishTime = raceTimer;
                 Gdx.app.log("ServerRaceManager",
                         "Player " + state.playerId + " FINISHED at " + String.format("%.2f", raceTimer) + "s");
 
@@ -566,6 +579,50 @@ public class ServerRaceManager {
         }
         broadcastReliableToAll(new RaceStateChangedPacket(
                 newState.ordinal(), countdownTimer, raceTimer));
+
+        if (newState == RaceState.FINISHED) {
+            broadcastRaceResults();
+        }
+    }
+
+    /**
+     * Fully resets the race manager to WAITING_FOR_PLAYERS.
+     * Called when the room becomes empty so the next session starts fresh.
+     */
+    public void resetToLobby() {
+        Gdx.app.log("ServerRaceManager", "Resetting to WAITING_FOR_PLAYERS (room empty or race ended).");
+        raceState = RaceState.WAITING_FOR_PLAYERS;
+        countdownTimer = COUNTDOWN_SECONDS;
+        raceTimer = 0f;
+        broadcastTickCounter = 0;
+
+        for (ServerPlayerState state : playersById.values()) {
+            state.ready = false;
+            state.bestPracticeLapTime = 0f;
+            state.resetForRace();
+        }
+    }
+
+    private void broadcastRaceResults() {
+        assignPositions();
+        sortBuffer.clear();
+        sortBuffer.addAll(playersById.values());
+        sortBuffer.sort(raceOrder);
+
+        int n = sortBuffer.size();
+        RaceResultsPacket packet = new RaceResultsPacket();
+        packet.playerIds = new int[n];
+        packet.playerNames = new String[n];
+        packet.finishTimes = new float[n];
+
+        for (int i = 0; i < n; i++) {
+            ServerPlayerState state = sortBuffer.get(i);
+            packet.playerIds[i] = state.playerId;
+            packet.playerNames[i] = state.name;
+            packet.finishTimes[i] = state.finishTime;
+        }
+
+        broadcastReliableToAll(packet);
     }
 
     private void broadcastReliableToAll(ReliablePacket packet) {
@@ -583,6 +640,9 @@ public class ServerRaceManager {
             return new RaceStateChangedPacket(r.newStateOrdinal, r.countdownTimer, r.raceTimer);
         }
         if (original instanceof GridAssignmentPacket) {
+            return original;
+        }
+        if (original instanceof RaceResultsPacket) {
             return original;
         }
         return original;

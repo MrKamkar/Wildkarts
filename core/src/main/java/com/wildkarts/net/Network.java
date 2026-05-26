@@ -31,6 +31,7 @@ public final class Network {
         // Primitive array types used in packets
         kryo.register(float[].class);
         kryo.register(int[].class);
+        kryo.register(String[].class);
 
         // Control packets
         kryo.register(AckPacket.class);
@@ -50,6 +51,7 @@ public final class Network {
         kryo.register(PlayerPassedPointPacket.class);
         kryo.register(SectorTimePacket.class);
         kryo.register(GridAssignmentPacket.class);
+        kryo.register(RaceResultsPacket.class);
 
         // Unreliable game packets
         kryo.register(PlayerPositionPacket.class);

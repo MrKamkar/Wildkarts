@@ -31,6 +31,7 @@ public class GameClient {
     public java.util.function.Consumer<SectorTimePacket> onSectorTime;
     public java.util.function.Consumer<RacePositionsUpdatePacket> onRacePositionsUpdate;
     public java.util.function.Consumer<GridAssignmentPacket> onGridAssignment;
+    public java.util.function.Consumer<RaceResultsPacket> onRaceResults;
 
     private String[] mapChunks;
     private int receivedChunksCount = 0;
@@ -38,6 +39,7 @@ public class GameClient {
     private boolean startGamePending = false;
 
     public int localPlayerId = -1;
+    public String playerName = "Player";
 
     public GameClient() {
         client = new Client();
@@ -60,7 +62,7 @@ public class GameClient {
                 Gdx.app.log("GameClient", "TCP Connection established. Sending JoinRequest via UDP.");
                 connected = true;
                 // Once connected via TCP, we initiate our game session via UDP
-                sendReliable(new JoinRequest("Player"));
+                sendReliable(new JoinRequest(playerName));
             }
 
             @Override
@@ -151,6 +153,12 @@ public class GameClient {
                         GridAssignmentPacket gap = (GridAssignmentPacket) object;
                         if (onGridAssignment != null) {
                             Gdx.app.postRunnable(() -> onGridAssignment.accept(gap));
+                        }
+                    }
+                    case "RaceResultsPacket" -> {
+                        RaceResultsPacket rrp = (RaceResultsPacket) object;
+                        if (onRaceResults != null) {
+                            Gdx.app.postRunnable(() -> onRaceResults.accept(rrp));
                         }
                     }
                     default -> {}
