@@ -49,6 +49,7 @@ public final class Network {
         kryo.register(RaceStateChangedPacket.class);
         kryo.register(PlayerPassedPointPacket.class);
         kryo.register(SectorTimePacket.class);
+        kryo.register(GridAssignmentPacket.class);
 
         // Unreliable game packets
         kryo.register(PlayerPositionPacket.class);

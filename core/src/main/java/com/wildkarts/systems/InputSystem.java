@@ -44,7 +44,9 @@ public class InputSystem extends IteratingSystem {
     private boolean isRaceInputBlocked() {
         if (raceEntities == null || raceEntities.size() == 0) return false;
         RaceComponent race = raceMapper.get(raceEntities.first());
-        return race != null && race.currentState != RaceState.RACING;
+        return race != null
+                && race.currentState != RaceState.RACING
+                && race.currentState != RaceState.PRACTICE;
     }
 
     @Override

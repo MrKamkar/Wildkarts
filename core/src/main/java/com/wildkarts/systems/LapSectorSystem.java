@@ -104,7 +104,7 @@ public class LapSectorSystem extends EntitySystem {
     public void update(float deltaTime) {
         RaceComponent race = getRaceComponent();
         if (race == null) return;
-        if (race.currentState != RaceState.RACING) return;
+        if (race.currentState != RaceState.RACING && race.currentState != RaceState.PRACTICE) return;
 
         Array<Vector2> points = trackGenerator.getManualPoints();
         int totalPoints = points.size;

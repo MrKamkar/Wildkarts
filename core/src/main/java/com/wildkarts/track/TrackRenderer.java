@@ -2,6 +2,8 @@ package com.wildkarts.track;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.CatmullRomSpline;
 import com.badlogic.gdx.math.Vector2;
@@ -11,14 +13,21 @@ import com.badlogic.gdx.utils.Array;
  * Renders the track tile grid, finish line, and editor overlay (control points + spline curve).
  *
  * Tile rendering uses camera-based culling to only draw visible tiles,
- * avoiding the cost of rendering the full 200×200 grid every frame.
+ * avoiding the cost of rendering the full 200x200 grid every frame.
+ *
+ * Grass tiles are rendered as a tiled PNG texture (256x256, repeating pattern).
+ * Road tiles are drawn on top using ShapeRenderer.
  */
 public class TrackRenderer {
 
     private final ShapeRenderer shapeRenderer;
+    private final SpriteBatch batch;
+    private final Texture grassTexture;
+
+    /** World-space size (meters) of one grass texture repetition. */
+    private static final float GRASS_TILE_WORLD_SIZE = 4.0f;
 
     // Terrain colors
-    private static final Color GRASS_COLOR = new Color(0.18f, 0.45f, 0.15f, 1f);
     private static final Color ROAD_COLOR  = new Color(0.35f, 0.35f, 0.38f, 1f);
 
     // Curb colors (alternating red/white racing kerb pattern)
@@ -40,16 +49,19 @@ public class TrackRenderer {
     /** Thickness of the finish line strip in meters (along road direction). */
     private static final float FINISH_LINE_THICKNESS = 1.2f;
 
-    public TrackRenderer() {
+    public TrackRenderer(Texture grassTexture) {
         shapeRenderer = new ShapeRenderer();
+        batch = new SpriteBatch();
+        this.grassTexture = grassTexture;
     }
 
     /**
-     * Renders the tile grid (grass + road + curbs) and finish line.
+     * Renders the tile grid (grass texture + road + curbs) and finish line.
      * Call BEFORE entity rendering so that tiles appear as background.
      */
     public void render(OrthographicCamera camera, TrackGenerator track) {
         shapeRenderer.setProjectionMatrix(camera.combined);
+        batch.setProjectionMatrix(camera.combined);
         renderTiles(camera, track);
         renderCurbs(track);
         renderFinishLine(track);
@@ -69,14 +81,6 @@ public class TrackRenderer {
     // ─── Tile Grid ─────────────────────────────────────────────────────
 
     private void renderTiles(OrthographicCamera camera, TrackGenerator track) {
-        int[][] grid = track.getGrid();
-        if (grid == null) return;
-
-        float tileSize = track.getTileSize();
-        float originX = track.getOriginX();
-        float originY = track.getOriginY();
-
-        // Camera-based culling: only render visible tile range
         float halfW = camera.viewportWidth * camera.zoom / 2f;
         float halfH = camera.viewportHeight * camera.zoom / 2f;
         float camLeft   = camera.position.x - halfW;
@@ -84,25 +88,74 @@ public class TrackRenderer {
         float camBottom = camera.position.y - halfH;
         float camTop    = camera.position.y + halfH;
 
-        int minCol = Math.max(0, (int) ((camLeft - originX) / tileSize) - 1);
-        int maxCol = Math.min(track.getGridWidth() - 1, (int) ((camRight - originX) / tileSize) + 1);
-        int minRow = Math.max(0, (int) ((camBottom - originY) / tileSize) - 1);
-        int maxRow = Math.min(track.getGridHeight() - 1, (int) ((camTop - originY) / tileSize) + 1);
+        // --- Phase 1: tiled grass texture covering the entire visible area ---
+        float visWidth  = camRight - camLeft;
+        float visHeight = camTop - camBottom;
+
+        float u  = camLeft   / GRASS_TILE_WORLD_SIZE;
+        float v  = camBottom / GRASS_TILE_WORLD_SIZE;
+        float u2 = camRight  / GRASS_TILE_WORLD_SIZE;
+        float v2 = camTop    / GRASS_TILE_WORLD_SIZE;
+
+        batch.begin();
+        batch.draw(grassTexture, camLeft, camBottom, visWidth, visHeight, u, v, u2, v2);
+        batch.end();
+
+        // --- Phase 2: smooth spline-based road polygon ---
+        renderRoadSpline(track);
+    }
+
+    /**
+     * Draws the road as a smooth polygon strip along the Catmull-Rom spline.
+     * Replaces per-tile rectangles for silky-smooth curved edges.
+     */
+    private void renderRoadSpline(TrackGenerator track) {
+        CatmullRomSpline<Vector2> spline = track.getSpline();
+        if (spline == null) return;
+
+        float halfWidth = track.getTrackHalfWidth();
+        if (halfWidth <= 0f) return;
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        for (int col = minCol; col <= maxCol; col++) {
-            for (int row = minRow; row <= maxRow; row++) {
-                int tile = grid[col][row];
-                if (tile == TrackGenerator.TILE_ROAD) {
-                    shapeRenderer.setColor(ROAD_COLOR);
-                } else {
-                    shapeRenderer.setColor(GRASS_COLOR);
-                }
-                float x = originX + col * tileSize;
-                float y = originY + row * tileSize;
-                shapeRenderer.rect(x, y, tileSize, tileSize);
-            }
+        shapeRenderer.setColor(ROAD_COLOR);
+
+        Vector2 pos = new Vector2();
+        Vector2 nextPos = new Vector2();
+        Vector2 tangent = new Vector2();
+        Vector2 nextTangent = new Vector2();
+
+        float step = 0.002f;
+
+        spline.valueAt(pos, 0f);
+        spline.derivativeAt(tangent, 0f);
+
+        for (float t = step; t <= 1f + step * 0.5f; t += step) {
+            float tc = Math.min(t, 1f);
+            spline.valueAt(nextPos, tc);
+            spline.derivativeAt(nextTangent, tc);
+
+            float nx = -tangent.y;
+            float ny = tangent.x;
+            float len = (float) Math.sqrt(nx * nx + ny * ny);
+            if (len > 0.001f) { nx /= len; ny /= len; }
+
+            float nnx = -nextTangent.y;
+            float nny = nextTangent.x;
+            float nlen = (float) Math.sqrt(nnx * nnx + nny * nny);
+            if (nlen > 0.001f) { nnx /= nlen; nny /= nlen; }
+
+            float l1x = pos.x + nx * halfWidth, l1y = pos.y + ny * halfWidth;
+            float r1x = pos.x - nx * halfWidth, r1y = pos.y - ny * halfWidth;
+            float l2x = nextPos.x + nnx * halfWidth, l2y = nextPos.y + nny * halfWidth;
+            float r2x = nextPos.x - nnx * halfWidth, r2y = nextPos.y - nny * halfWidth;
+
+            shapeRenderer.triangle(l1x, l1y, r1x, r1y, l2x, l2y);
+            shapeRenderer.triangle(r1x, r1y, r2x, r2y, l2x, l2y);
+
+            pos.set(nextPos);
+            tangent.set(nextTangent);
         }
+
         shapeRenderer.end();
     }
 
@@ -146,7 +199,6 @@ public class TrackRenderer {
 
         // Along-road offset vectors (half thickness)
         float halfThick = FINISH_LINE_THICKNESS / 2f;
-        Vector2 along = new Vector2(dir).scl(halfThick);
 
         // Size of each checker square
         float totalWidth = halfWidth * 2f;
@@ -277,5 +329,6 @@ public class TrackRenderer {
 
     public void dispose() {
         shapeRenderer.dispose();
+        batch.dispose();
     }
 }

@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.Texture.TextureWrap;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -43,6 +44,7 @@ import com.wildkarts.components.RaceState;
 import com.wildkarts.components.TerrainComponent;
 import com.wildkarts.factory.CarFactory;
 import com.wildkarts.net.GameClient;
+import com.wildkarts.net.packets.GridAssignmentPacket;
 import com.wildkarts.net.packets.MapReadyPacket;
 import com.wildkarts.net.packets.PlayerPositionPacket;
 import com.wildkarts.net.packets.PlayerReadyPacket;
@@ -160,6 +162,18 @@ public class GameScreen extends ScreenAdapter {
 
     private static final String MAP_FILE = "custom_map.json";
 
+    // ─── Asset Paths ────────────────────────────────────────────────────
+    private static final String ASSETS_PATH        = "sprites/";
+    private static final String TEXTURES_PATH      = "textures/";
+    private static final String CAR_STRAIGHT_FILE  = ASSETS_PATH + "car_straight.png";
+    private static final String CAR_TURN_FILE      = ASSETS_PATH + "car_turn.png";
+    private static final String GRASS_TEXTURE_FILE = TEXTURES_PATH + "grass.png";
+
+    // Loaded textures (managed by loadAllAssets / dispose)
+    private Texture carStraightTexture;
+    private Texture carTurnTexture;
+    private Texture grassTexture;
+
     @Override
     public void show() {
         // --- Camera setup ---
@@ -168,12 +182,15 @@ public class GameScreen extends ScreenAdapter {
         camera.position.set(0, 0, 0);
         camera.update();
 
+        // --- Load all graphic assets before anything else ---
+        loadAllAssets();
+
         // --- Box2D world (no gravity — top-down!) ---
         world = new World(new Vector2(0, 0), true);
 
         // --- Track generator ---
         trackGenerator = new TrackGenerator();
-        trackRenderer = new TrackRenderer();
+        trackRenderer = new TrackRenderer(grassTexture);
 
         // In multiplayer, load the default map. In Map Editor, start clean.
         // Track generation handled via network in multiplayer
@@ -209,7 +226,7 @@ public class GameScreen extends ScreenAdapter {
         skidmarkSystem = new SkidmarkSystem(camera);
         skidmarkSystem.priority = 4;
 
-        renderSystem = new RenderSystem(camera, world, physicsSystem);
+        renderSystem = new RenderSystem(camera, world, physicsSystem, carStraightTexture, carTurnTexture);
         renderSystem.priority = 5;
 
         carDebugRenderSystem = new CarDebugRenderSystem(camera);
@@ -326,6 +343,56 @@ public class GameScreen extends ScreenAdapter {
             // --- Create boundary walls ---
             createBoundaryWalls();
         }
+    }
+
+    // ─── Asset Loading ────────────────────────────────────────────────
+
+    /**
+     * Loads all graphic assets (car sprites, grass texture) and ensures they
+     * are fully available before the game loop begins drawing.
+     * If a PNG file is missing, a procedural placeholder is generated so the
+     * game can still run without the actual art assets.
+     */
+    private void loadAllAssets() {
+        carStraightTexture = loadTextureOrPlaceholder(CAR_STRAIGHT_FILE,
+                32, 64, new Color(0.2f, 0.6f, 1.0f, 1f));
+        carTurnTexture = loadTextureOrPlaceholder(CAR_TURN_FILE,
+                32, 64, new Color(0.2f, 0.5f, 0.9f, 1f));
+        grassTexture = loadTextureOrPlaceholder(GRASS_TEXTURE_FILE,
+                256, 256, new Color(0.18f, 0.45f, 0.15f, 1f));
+
+        carStraightTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        carTurnTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        grassTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        grassTexture.setWrap(TextureWrap.Repeat, TextureWrap.Repeat);
+
+        Gdx.app.log("Assets", "All assets loaded — car_straight: " + CAR_STRAIGHT_FILE
+                + ", car_turn: " + CAR_TURN_FILE + ", grass: " + GRASS_TEXTURE_FILE);
+    }
+
+    /**
+     * Attempts to load a texture from an internal file path.
+     * On failure (file missing or corrupt), creates a solid-color placeholder
+     * of the given dimensions so the game remains runnable.
+     */
+    private Texture loadTextureOrPlaceholder(String path, int fallbackW, int fallbackH, Color fallbackColor) {
+        try {
+            if (Gdx.files.internal(path).exists()) {
+                Texture tex = new Texture(Gdx.files.internal(path));
+                Gdx.app.log("Assets", "Loaded: " + path);
+                return tex;
+            }
+        } catch (Exception e) {
+            Gdx.app.error("Assets", "Failed to load " + path + ": " + e.getMessage());
+        }
+
+        Gdx.app.log("Assets", "Using placeholder for missing asset: " + path);
+        Pixmap pixmap = new Pixmap(fallbackW, fallbackH, Pixmap.Format.RGBA8888);
+        pixmap.setColor(fallbackColor);
+        pixmap.fill();
+        Texture tex = new Texture(pixmap);
+        pixmap.dispose();
+        return tex;
     }
 
     // ─── State Transitions ─────────────────────────────────────────────
@@ -454,7 +521,7 @@ public class GameScreen extends ScreenAdapter {
         }
         raceEntity = new Entity();
         RaceComponent race = new RaceComponent();
-        race.currentState = RaceState.WAITING_FOR_PLAYERS;
+        race.currentState = isMultiplayerMode ? RaceState.PRACTICE : RaceState.WAITING_FOR_PLAYERS;
         race.countdownTimer = 3.0f;
         race.raceTimer = 0.0f;
         race.maxLaps = 3;
@@ -559,10 +626,35 @@ public class GameScreen extends ScreenAdapter {
                 if (lap == null) continue;
                 lap.racePosition = packet.positions[i];
                 lap.currentLap = packet.currentLaps[i];
-                // We DON'T overwrite nextTrackPointIndex here for the local
-                // player — that field is owned by SectorTimePacket round-trips.
                 if (pid != gameClient.localPlayerId) {
                     lap.nextTrackPointIndex = packet.nextTrackPointIndices[i];
+                }
+            }
+        };
+
+        gameClient.onGridAssignment = packet -> {
+            if (packet.playerIds == null) return;
+            Gdx.app.log("GameScreen", "Grid assignment received — teleporting cars.");
+            for (int i = 0; i < packet.playerIds.length; i++) {
+                int pid = packet.playerIds[i];
+                Entity carEntity = findCarEntityByPlayerId(pid);
+                if (carEntity == null) continue;
+                PhysicsComponent phys = carEntity.getComponent(PhysicsComponent.class);
+                if (phys == null || phys.body == null) continue;
+                phys.body.setTransform(packet.xs[i], packet.ys[i], packet.angles[i]);
+                phys.body.setLinearVelocity(0, 0);
+                phys.body.setAngularVelocity(0);
+                phys.prevPosition.set(packet.xs[i], packet.ys[i]);
+                phys.prevAngle = packet.angles[i];
+
+                LapComponent lap = carEntity.getComponent(LapComponent.class);
+                if (lap != null) {
+                    lap.currentLap = 1;
+                    lap.nextTrackPointIndex = 1;
+                    lap.currentSector = 0;
+                    lap.currentSectorElapsed = 0f;
+                    lap.finished = false;
+                    lap.lastRequestedPointIndex = -1;
                 }
             }
         };
@@ -933,7 +1025,9 @@ public class GameScreen extends ScreenAdapter {
         // Toggle lobby panel based on race phase (only meaningful while PLAYING)
         if (currentState == GameState.PLAYING && lobbyPanel != null) {
             RaceComponent race = getRaceComponent();
-            boolean showLobby = race != null && race.currentState == RaceState.WAITING_FOR_PLAYERS;
+            boolean showLobby = race != null
+                    && (race.currentState == RaceState.WAITING_FOR_PLAYERS
+                        || race.currentState == RaceState.PRACTICE);
             lobbyPanel.setVisible(showLobby);
         } else if (lobbyPanel != null) {
             lobbyPanel.setVisible(false);
@@ -1101,5 +1195,9 @@ public class GameScreen extends ScreenAdapter {
         if (playStage != null) playStage.dispose();
         if (escapeMenuStage != null) escapeMenuStage.dispose();
         if (uiFont != null) uiFont.dispose();
+
+        if (carStraightTexture != null) carStraightTexture.dispose();
+        if (carTurnTexture != null) carTurnTexture.dispose();
+        if (grassTexture != null) grassTexture.dispose();
     }
 }

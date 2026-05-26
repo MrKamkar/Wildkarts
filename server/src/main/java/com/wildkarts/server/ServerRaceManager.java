@@ -1,6 +1,7 @@
 package com.wildkarts.server;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 import com.esotericsoftware.kryonet.Connection;
@@ -8,6 +9,7 @@ import com.esotericsoftware.kryonet.Server;
 import com.wildkarts.components.RaceState;
 import com.wildkarts.net.ReliablePacket;
 import com.wildkarts.net.UdpReliabilityManager;
+import com.wildkarts.net.packets.GridAssignmentPacket;
 import com.wildkarts.net.packets.LobbyStatusPacket;
 import com.wildkarts.net.packets.PlayerPassedPointPacket;
 import com.wildkarts.net.packets.PlayerReadyPacket;
@@ -25,23 +27,11 @@ import java.util.Map;
 /**
  * Authoritative race state for the headless server.
  *
- * <p>Responsibilities:</p>
- * <ul>
- *   <li>Track each connected player's lap, sector, point progress and last
- *       known position.</li>
- *   <li>Drive the race FSM (WAITING_FOR_PLAYERS → COUNTDOWN → RACING →
- *       FINISHED) at the server's tick rate (~30 Hz from
- *       {@code HeadlessApplicationConfiguration.updatesPerSecond}).</li>
- *   <li>Validate {@link PlayerPassedPointPacket} requests against the
- *       server's copy of the track points and the last known position
- *       (cheap anti-cheat) before recording sector / lap progress.</li>
- *   <li>Sort racers every tick and periodically broadcast a
- *       {@link RacePositionsUpdatePacket} leaderboard snapshot.</li>
- * </ul>
+ * <p>FSM: WAITING_FOR_PLAYERS -> PRACTICE -> COUNTDOWN -> RACING -> FINISHED</p>
  *
- * <p>This class deliberately does NOT depend on libGDX Box2D or Ashley —
- * the server runs headless and only needs the manual control points from
- * {@link TrackGenerator} to validate positions.</p>
+ * <p>During PRACTICE players drive freely and record lap times. When all
+ * players signal ready, the server computes grid positions based on best
+ * practice lap times and transitions to COUNTDOWN.</p>
  */
 public class ServerRaceManager {
 
@@ -51,15 +41,16 @@ public class ServerRaceManager {
     private static final int TOTAL_SECTORS = 3;
     private static final float COUNTDOWN_SECONDS = 3.0f;
 
-    /**
-     * Maximum allowed distance (meters) between the player's last reported
-     * position and the track point they claim to have passed. Cheaper than
-     * "did they tunnel through walls?" but catches blatant teleport spoofs.
-     */
     private static final float POSITION_VALIDATION_RADIUS = 8f;
 
     /** Tick interval (in update calls) between leaderboard broadcasts. */
     private static final int POSITIONS_BROADCAST_INTERVAL_TICKS = 5;
+
+    /** Spacing in meters between grid slots along the road direction. */
+    private static final float GRID_SLOT_SPACING = 3.0f;
+
+    /** Offset behind the start line for the first grid slot. */
+    private static final float GRID_START_OFFSET = 2.0f;
 
     // ─── Per-player Server-side State ─────────────────────────────────
 
@@ -68,13 +59,17 @@ public class ServerRaceManager {
         public final Connection connection;
         public String name = "Player";
 
-        // Lobby
+        // Lobby / practice
         public boolean ready = false;
+        public boolean mapLoaded = false;
 
         // Position (updated from PlayerPositionPacket relay)
         public float lastX = 0f;
         public float lastY = 0f;
         public boolean hasPosition = false;
+
+        // Practice best lap time (0 = no completed lap)
+        public float bestPracticeLapTime = 0f;
 
         // Lap / sector progress
         public int currentLap = 1;
@@ -93,6 +88,34 @@ public class ServerRaceManager {
         public ServerPlayerState(int playerId, Connection connection) {
             this.playerId = playerId;
             this.connection = connection;
+        }
+
+        /** Resets all race progress but preserves bestPracticeLapTime and connection info. */
+        public void resetForRace() {
+            currentLap = 1;
+            nextTrackPointIndex = 1;
+            currentSector = 0;
+            currentSectorElapsed = 0f;
+            for (int i = 0; i < TOTAL_SECTORS; i++) {
+                currentLapSectorTimes[i] = 0f;
+                bestSectorTimes[i] = 0f;
+            }
+            lastSectorDelta = 0f;
+            finished = false;
+            racePosition = 1;
+            distanceToNextPointSq = Float.MAX_VALUE;
+        }
+
+        /** Resets practice lap progress (called after each practice lap completion). */
+        public void resetForNextPracticeLap() {
+            currentLap = 1;
+            nextTrackPointIndex = 1;
+            currentSector = 0;
+            currentSectorElapsed = 0f;
+            for (int i = 0; i < TOTAL_SECTORS; i++) {
+                currentLapSectorTimes[i] = 0f;
+            }
+            lastSectorDelta = 0f;
         }
     }
 
@@ -113,7 +136,6 @@ public class ServerRaceManager {
 
     private int broadcastTickCounter = 0;
 
-    // Reusable sort buffer (avoids per-tick allocation)
     private final List<ServerPlayerState> sortBuffer = new ArrayList<>();
 
     private final Comparator<ServerPlayerState> raceOrder = (a, b) -> {
@@ -126,6 +148,13 @@ public class ServerRaceManager {
         return Float.compare(a.distanceToNextPointSq, b.distanceToNextPointSq);
     };
 
+    private final Comparator<ServerPlayerState> gridOrder = (a, b) -> {
+        if (a.bestPracticeLapTime <= 0f && b.bestPracticeLapTime <= 0f) return 0;
+        if (a.bestPracticeLapTime <= 0f) return 1;
+        if (b.bestPracticeLapTime <= 0f) return -1;
+        return Float.compare(a.bestPracticeLapTime, b.bestPracticeLapTime);
+    };
+
     public ServerRaceManager(Server server, UdpReliabilityManager reliabilityManager,
                               TrackGenerator trackGenerator) {
         this.server = server;
@@ -134,7 +163,6 @@ public class ServerRaceManager {
         this.trackPoints = trackGenerator.getManualPoints();
     }
 
-    /** Refreshes the cached track points after the server loads/updates a map. */
     public void refreshTrackPoints() {
         this.trackPoints = trackGenerator.getManualPoints();
     }
@@ -159,12 +187,27 @@ public class ServerRaceManager {
         }
     }
 
+    /**
+     * Called when a client has fully loaded the map and is ready to spawn a car.
+     * Transitions to PRACTICE when the first player loads.
+     */
+    public void onPlayerMapLoaded(Connection connection) {
+        ServerPlayerState state = playersByConnId.get(connection.getID());
+        if (state == null) return;
+        state.mapLoaded = true;
+        Gdx.app.log("ServerRaceManager", "Player " + state.playerId + " map loaded.");
+
+        if (raceState == RaceState.WAITING_FOR_PLAYERS) {
+            transitionTo(RaceState.PRACTICE);
+        }
+    }
+
     // ─── Packet Handlers ──────────────────────────────────────────────
 
     public void onPlayerReady(Connection connection, PlayerReadyPacket packet) {
         ServerPlayerState state = playersByConnId.get(connection.getID());
         if (state == null) return;
-        if (raceState != RaceState.WAITING_FOR_PLAYERS) return;
+        if (raceState != RaceState.PRACTICE) return;
         if (state.ready == packet.ready) return;
 
         state.ready = packet.ready;
@@ -182,21 +225,17 @@ public class ServerRaceManager {
     }
 
     public void onPlayerPassedPoint(Connection connection, PlayerPassedPointPacket packet) {
-        if (raceState != RaceState.RACING) return;
+        if (raceState != RaceState.RACING && raceState != RaceState.PRACTICE) return;
 
         ServerPlayerState state = playersByConnId.get(connection.getID());
         if (state == null) return;
         if (state.finished) return;
-        if (packet.pointIndex != state.nextTrackPointIndex) {
-            // Out-of-order or stale request — ignore.
-            return;
-        }
+        if (packet.pointIndex != state.nextTrackPointIndex) return;
 
         int totalPoints = trackPoints.size;
         if (totalPoints < 3) return;
         if (packet.pointIndex < 0 || packet.pointIndex >= totalPoints) return;
 
-        // Anti-cheat: client must actually be near the claimed point.
         Vector2 expected = trackPoints.get(packet.pointIndex);
         float dx = expected.x - packet.x;
         float dy = expected.y - packet.y;
@@ -206,7 +245,11 @@ public class ServerRaceManager {
             return;
         }
 
-        advancePoint(state, packet.pointIndex, totalPoints);
+        if (raceState == RaceState.PRACTICE) {
+            advancePointPractice(state, packet.pointIndex, totalPoints);
+        } else {
+            advancePoint(state, packet.pointIndex, totalPoints);
+        }
     }
 
     // ─── Server Tick ──────────────────────────────────────────────────
@@ -214,7 +257,9 @@ public class ServerRaceManager {
     public void update(float deltaTime) {
         switch (raceState) {
             case WAITING_FOR_PLAYERS:
-                tickLobby();
+                break;
+            case PRACTICE:
+                tickPractice(deltaTime);
                 break;
             case COUNTDOWN:
                 tickCountdown(deltaTime);
@@ -227,7 +272,13 @@ public class ServerRaceManager {
         }
     }
 
-    private void tickLobby() {
+    private void tickPractice(float deltaTime) {
+        for (ServerPlayerState state : playersById.values()) {
+            if (state.mapLoaded) {
+                state.currentSectorElapsed += deltaTime;
+            }
+        }
+
         if (playersById.isEmpty()) return;
         boolean allReady = true;
         for (ServerPlayerState state : playersById.values()) {
@@ -237,6 +288,7 @@ public class ServerRaceManager {
             }
         }
         if (allReady) {
+            computeAndSendGrid();
             transitionTo(RaceState.COUNTDOWN);
         }
     }
@@ -264,7 +316,57 @@ public class ServerRaceManager {
         }
     }
 
-    // ─── Lap / Sector Logic (mirror of LapSectorSystem) ───────────────
+    // ─── Practice Lap Logic ───────────────────────────────────────────
+
+    private void advancePointPractice(ServerPlayerState state, int passedIdx, int totalPoints) {
+        state.nextTrackPointIndex = (passedIdx + 1) % totalPoints;
+
+        int completedSectorIdx = sectorEndingAt(passedIdx, totalPoints, TOTAL_SECTORS);
+
+        SectorTimePacket response = new SectorTimePacket();
+        response.playerId = state.playerId;
+        response.sectorIndex = completedSectorIdx;
+        response.bestSectorTime = 0f;
+        response.sectorTime = 0f;
+        response.delta = 0f;
+        response.lastLapTime = 0f;
+        response.bestPracticeLapTime = state.bestPracticeLapTime;
+
+        if (passedIdx == 0) {
+            if (completedSectorIdx >= 0) {
+                recordSectorTime(state, completedSectorIdx, response);
+            }
+
+            float lapTime = 0f;
+            for (float t : state.currentLapSectorTimes) {
+                lapTime += t;
+            }
+
+            if (lapTime > 0f) {
+                response.lastLapTime = lapTime;
+                if (state.bestPracticeLapTime <= 0f || lapTime < state.bestPracticeLapTime) {
+                    state.bestPracticeLapTime = lapTime;
+                    Gdx.app.log("ServerRaceManager", String.format(
+                            "Player %d NEW BEST practice lap: %.2fs", state.playerId, lapTime));
+                }
+                response.bestPracticeLapTime = state.bestPracticeLapTime;
+            }
+
+            state.resetForNextPracticeLap();
+        } else if (completedSectorIdx >= 0) {
+            recordSectorTime(state, completedSectorIdx, response);
+        }
+
+        response.currentLap = state.currentLap;
+        response.nextTrackPointIndex = state.nextTrackPointIndex;
+        response.currentSector = state.currentSector;
+        response.finished = false;
+        response.raceTimerSnapshot = 0f;
+
+        reliabilityManager.send(state.connection, response);
+    }
+
+    // ─── Race Lap / Sector Logic ──────────────────────────────────────
 
     private void advancePoint(ServerPlayerState state, int passedIdx, int totalPoints) {
         state.nextTrackPointIndex = (passedIdx + 1) % totalPoints;
@@ -277,9 +379,10 @@ public class ServerRaceManager {
         response.bestSectorTime = 0f;
         response.sectorTime = 0f;
         response.delta = 0f;
+        response.lastLapTime = 0f;
+        response.bestPracticeLapTime = state.bestPracticeLapTime;
 
         if (passedIdx == 0) {
-            // Finish line: closes the final sector AND advances the lap.
             if (completedSectorIdx >= 0) {
                 recordSectorTime(state, completedSectorIdx, response);
             }
@@ -292,8 +395,6 @@ public class ServerRaceManager {
                 Gdx.app.log("ServerRaceManager",
                         "Player " + state.playerId + " FINISHED at " + String.format("%.2f", raceTimer) + "s");
 
-                // Optionally transition the global FSM when the first player finishes
-                // — for now we keep RACING until all are finished.
                 if (allPlayersFinished()) {
                     transitionTo(RaceState.FINISHED);
                 }
@@ -344,6 +445,58 @@ public class ServerRaceManager {
         }
         if (passedIdx == 0) return totalSectors - 1;
         return -1;
+    }
+
+    // ─── Grid Computation ─────────────────────────────────────────────
+
+    /**
+     * Sorts players by best practice lap time (fastest = pole), computes
+     * world-space grid coordinates, sends {@link GridAssignmentPacket} to
+     * all clients, and resets player race state.
+     */
+    private void computeAndSendGrid() {
+        sortBuffer.clear();
+        sortBuffer.addAll(playersById.values());
+        sortBuffer.sort(gridOrder);
+
+        Vector2 startPos = trackGenerator.getStartPosition();
+        float startAngle = trackGenerator.getStartAngle();
+
+        float roadDirAngle = startAngle + MathUtils.HALF_PI;
+        float rdx = MathUtils.cos(roadDirAngle);
+        float rdy = MathUtils.sin(roadDirAngle);
+
+        int n = sortBuffer.size();
+        GridAssignmentPacket packet = new GridAssignmentPacket();
+        packet.playerIds = new int[n];
+        packet.gridPositions = new int[n];
+        packet.xs = new float[n];
+        packet.ys = new float[n];
+        packet.angles = new float[n];
+        packet.bestLapTimes = new float[n];
+
+        for (int i = 0; i < n; i++) {
+            ServerPlayerState state = sortBuffer.get(i);
+            float offset = GRID_START_OFFSET + i * GRID_SLOT_SPACING;
+            float gx = startPos.x - rdx * offset;
+            float gy = startPos.y - rdy * offset;
+
+            packet.playerIds[i] = state.playerId;
+            packet.gridPositions[i] = i + 1;
+            packet.xs[i] = gx;
+            packet.ys[i] = gy;
+            packet.angles[i] = startAngle;
+            packet.bestLapTimes[i] = state.bestPracticeLapTime;
+
+            state.resetForRace();
+
+            Gdx.app.log("ServerRaceManager", String.format(
+                    "Grid P%d: player %d (%s) — best: %.2fs — pos: (%.1f, %.1f)",
+                    i + 1, state.playerId, state.name,
+                    state.bestPracticeLapTime, gx, gy));
+        }
+
+        broadcastReliableToAll(packet);
     }
 
     // ─── Positions & Broadcasts ───────────────────────────────────────
@@ -399,7 +552,9 @@ public class ServerRaceManager {
 
     private void transitionTo(RaceState newState) {
         raceState = newState;
-        if (newState == RaceState.COUNTDOWN) {
+        if (newState == RaceState.PRACTICE) {
+            Gdx.app.log("ServerRaceManager", "Race -> PRACTICE (free driving)");
+        } else if (newState == RaceState.COUNTDOWN) {
             countdownTimer = COUNTDOWN_SECONDS;
             raceTimer = 0f;
             Gdx.app.log("ServerRaceManager", "Race -> COUNTDOWN");
@@ -415,25 +570,20 @@ public class ServerRaceManager {
 
     private void broadcastReliableToAll(ReliablePacket packet) {
         for (ServerPlayerState state : playersById.values()) {
-            // Each connection needs its own sequenceId, so send individually.
-            // The reliability manager handles ACK / retransmission.
             ReliablePacket copy = clonePacket(packet);
             reliabilityManager.send(state.connection, copy);
         }
     }
 
-    /**
-     * KryoNet's reliability manager assigns sequenceId per send, but the
-     * same packet instance would be mutated by each call. We create a
-     * lightweight copy for each connection. Subclasses are handled by
-     * an explicit type dispatch — adequate for the small set used here.
-     */
     private ReliablePacket clonePacket(ReliablePacket original) {
         if (original instanceof LobbyStatusPacket l) {
             return new LobbyStatusPacket(l.readyPlayers, l.totalPlayers);
         }
         if (original instanceof RaceStateChangedPacket r) {
             return new RaceStateChangedPacket(r.newStateOrdinal, r.countdownTimer, r.raceTimer);
+        }
+        if (original instanceof GridAssignmentPacket) {
+            return original;
         }
         return original;
     }

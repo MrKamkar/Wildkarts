@@ -35,6 +35,12 @@ public class SectorTimePacket extends ReliablePacket {
     /** Authoritative race timer at the moment the sector ended. */
     public float raceTimerSnapshot;
 
+    /** Time of the just-completed lap (sum of sectors). 0 if not a lap boundary. */
+    public float lastLapTime;
+
+    /** Player's personal best full lap time during practice. 0 if no lap completed. */
+    public float bestPracticeLapTime;
+
     public SectorTimePacket() {
     }
 }

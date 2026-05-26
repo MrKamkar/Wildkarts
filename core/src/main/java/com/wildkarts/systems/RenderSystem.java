@@ -4,64 +4,75 @@ import com.badlogic.ashley.core.ComponentMapper;
 import com.badlogic.ashley.core.Entity;
 import com.badlogic.ashley.core.Family;
 import com.badlogic.ashley.systems.IteratingSystem;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.Box2DDebugRenderer;
 import com.badlogic.gdx.physics.box2d.World;
 import com.wildkarts.components.CarComponent;
+import com.wildkarts.components.InputComponent;
 import com.wildkarts.components.PhysicsComponent;
 
 /**
- * Renders car entities using ShapeRenderer + optional Box2D debug overlay.
- * 
- * This is a placeholder renderer — in production, this would be replaced
- * by a sprite-based system. The car is drawn as a colored rectangle with
- * a direction indicator (triangle at the front).
+ * Renders car entities as sprites (SpriteBatch) with optional Box2D debug overlay.
+ *
+ * Sprite selection based on steering input:
+ *   - No steering  → car_straight sprite
+ *   - Steering right (D) → car_turn sprite (default orientation)
+ *   - Steering left  (A) → car_turn sprite, horizontally flipped
  */
 public class RenderSystem extends IteratingSystem {
 
-    private final ShapeRenderer shapeRenderer;
+    /**
+     * Visual scale multiplier for the car sprite. The PNG has padding around
+     * the car body, so the sprite must be drawn larger than the physics
+     * hitbox for the visible car to match the collision shape.
+     */
+    private static final float SPRITE_SCALE = 2.0f;
+
+    private final SpriteBatch batch;
     private final Box2DDebugRenderer debugRenderer;
     private final OrthographicCamera camera;
     private final World world;
     private final PhysicsSystem physicsSystem;
     private boolean debugDraw = false;
 
-    // Car color scheme
-    private static final Color CAR_BODY_COLOR = new Color(0.2f, 0.6f, 1.0f, 1.0f);
-    private static final Color CAR_FRONT_COLOR = new Color(1.0f, 0.9f, 0.2f, 1.0f);
-    private static final Color CAR_DRIFT_COLOR = new Color(1.0f, 0.3f, 0.2f, 1.0f);
+    private final TextureRegion carStraightRegion;
+    private final TextureRegion carTurnRegion;
+    private final TextureRegion carTurnFlippedRegion;
 
     private final ComponentMapper<PhysicsComponent> physicsMapper =
             ComponentMapper.getFor(PhysicsComponent.class);
     private final ComponentMapper<CarComponent> carMapper =
             ComponentMapper.getFor(CarComponent.class);
+    private final ComponentMapper<InputComponent> inputMapper =
+            ComponentMapper.getFor(InputComponent.class);
 
-
-
-    public RenderSystem(OrthographicCamera camera, World world, PhysicsSystem physicsSystem) {
+    public RenderSystem(OrthographicCamera camera, World world, PhysicsSystem physicsSystem,
+                        Texture carStraight, Texture carTurn) {
         super(Family.all(PhysicsComponent.class).get());
         this.camera = camera;
         this.world = world;
         this.physicsSystem = physicsSystem;
-        this.shapeRenderer = new ShapeRenderer();
+        this.batch = new SpriteBatch();
         this.debugRenderer = new Box2DDebugRenderer();
+        this.carStraightRegion = new TextureRegion(carStraight);
+        this.carTurnRegion = new TextureRegion(carTurn);
+        this.carTurnFlippedRegion = new TextureRegion(carTurn);
+        this.carTurnFlippedRegion.flip(false, true);
     }
 
     @Override
     public void update(float deltaTime) {
-        shapeRenderer.setProjectionMatrix(camera.combined);
-
-        // Draw filled car bodies
-        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        batch.setProjectionMatrix(camera.combined);
+        batch.begin();
         super.update(deltaTime);
-        shapeRenderer.end();
+        batch.end();
 
-        // Box2D debug overlay
         if (debugDraw) {
             debugRenderer.render(world, camera.combined);
         }
@@ -70,17 +81,14 @@ public class RenderSystem extends IteratingSystem {
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         PhysicsComponent physics = physicsMapper.get(entity);
-        CarComponent car = carMapper.get(entity);
         Body body = physics.body;
 
         if (body == null) return;
 
         float alpha = physicsSystem != null ? physicsSystem.getInterpolationAlpha() : 1f;
 
-        // Visual interpolation between previous and current physics state (needed for multiplayer)
         Vector2 pos = new Vector2(physics.prevPosition).lerp(body.getPosition(), alpha);
-        
-        // Shortest path angle interpolation
+
         float currentAngle = body.getAngle();
         float prevAngle = physics.prevAngle;
         float diff = (currentAngle - prevAngle) % MathUtils.PI2;
@@ -88,67 +96,30 @@ public class RenderSystem extends IteratingSystem {
         if (diff > MathUtils.PI) diff -= MathUtils.PI2;
         else if (diff < -MathUtils.PI) diff += MathUtils.PI2;
         float angle = prevAngle + diff * alpha;
-        float hw = physics.widthMeters / 2f;
-        float hh = physics.heightMeters / 2f;
 
-        boolean isDrifting = car != null
-                ? Math.abs(car.rearSlipAngle) > 0.12f || Math.abs(car.frontSlipAngle) > 0.12f
-                : Math.abs(getLateralSpeed(body, angle)) > 1.5f;
+        InputComponent input = inputMapper.has(entity) ? inputMapper.get(entity) : null;
+        float steer = input != null ? input.steering : 0f;
 
-        // Draw car body as a rotated rectangle
-        Color bodyColor = isDrifting ? CAR_DRIFT_COLOR : CAR_BODY_COLOR;
-        drawRotatedRect(pos.x, pos.y, physics.widthMeters, physics.heightMeters, angle, bodyColor);
+        TextureRegion region;
 
-        // Draw front indicator (small triangle)
-        float frontX = pos.x + MathUtils.cos(angle + MathUtils.HALF_PI) * hh * 0.7f;
-        float frontY = pos.y + MathUtils.sin(angle + MathUtils.HALF_PI) * hh * 0.7f;
-        drawDirectionIndicator(frontX, frontY, angle, hw * 0.5f, CAR_FRONT_COLOR);
-    }
+        if (steer < -0.01f) {
+            region = carTurnRegion;
+        } else if (steer > 0.01f) {
+            region = carTurnFlippedRegion;
+        } else {
+            region = carStraightRegion;
+        }
 
-    private float getLateralSpeed(Body body, float angle) {
-        Vector2 vel = body.getLinearVelocity();
-        float latDirX = MathUtils.cos(angle);
-        float latDirY = MathUtils.sin(angle);
-        return vel.x * latDirX + vel.y * latDirY;
-    }
+        float spriteW = physics.heightMeters * SPRITE_SCALE;
+        float spriteH = physics.widthMeters * SPRITE_SCALE;
 
-    private void drawRotatedRect(float cx, float cy, float w, float h, float angle, Color color) {
-        shapeRenderer.setColor(color);
-        float hw = w / 2f;
-        float hh = h / 2f;
-        float cos = MathUtils.cos(angle);
-        float sin = MathUtils.sin(angle);
+        float drawX = pos.x - spriteW / 2f;
+        float drawY = pos.y - spriteH / 2f;
+        float originX = spriteW / 2f;
+        float originY = spriteH / 2f;
+        float rotation = angle * MathUtils.radiansToDegrees + 90f;
 
-        // 4 corners of the rotated rectangle
-        float x1 = cx + (-hw * cos - (-hh) * sin);
-        float y1 = cy + (-hw * sin + (-hh) * cos);
-        float x2 = cx + (hw * cos - (-hh) * sin);
-        float y2 = cy + (hw * sin + (-hh) * cos);
-        float x3 = cx + (hw * cos - hh * sin);
-        float y3 = cy + (hw * sin + hh * cos);
-        float x4 = cx + (-hw * cos - hh * sin);
-        float y4 = cy + (-hw * sin + hh * cos);
-
-        // Two triangles to form the rectangle
-        shapeRenderer.triangle(x1, y1, x2, y2, x3, y3);
-        shapeRenderer.triangle(x1, y1, x3, y3, x4, y4);
-    }
-
-    private void drawDirectionIndicator(float cx, float cy, float angle, float size, Color color) {
-        shapeRenderer.setColor(color);
-        float cos = MathUtils.cos(angle + MathUtils.HALF_PI);
-        float sin = MathUtils.sin(angle + MathUtils.HALF_PI);
-        float cosL = MathUtils.cos(angle + MathUtils.PI);
-        float sinL = MathUtils.sin(angle + MathUtils.PI);
-
-        float tipX = cx + cos * size;
-        float tipY = cy + sin * size;
-        float leftX = cx + cosL * size * 0.5f - cos * size * 0.3f;
-        float leftY = cy + sinL * size * 0.5f - sin * size * 0.3f;
-        float rightX = cx - cosL * size * 0.5f - cos * size * 0.3f;
-        float rightY = cy - sinL * size * 0.5f - sin * size * 0.3f;
-
-        shapeRenderer.triangle(tipX, tipY, leftX, leftY, rightX, rightY);
+        batch.draw(region, drawX, drawY, originX, originY, spriteW, spriteH, 1f, 1f, rotation);
     }
 
     public void toggleDebugDraw() {
@@ -156,7 +127,7 @@ public class RenderSystem extends IteratingSystem {
     }
 
     public void dispose() {
-        shapeRenderer.dispose();
+        batch.dispose();
         debugRenderer.dispose();
     }
 }

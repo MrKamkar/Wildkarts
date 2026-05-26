@@ -23,8 +23,8 @@ public class PhysicsComponent implements Component {
     public float prevAngle = 0f;
 
     /** Width of the physics shape in meters (Box2D units). */
-    public float widthMeters = 0.8f;
+    public float widthMeters = 1.2f;
 
     /** Height (length) of the physics shape in meters (Box2D units). */
-    public float heightMeters = 1.6f;
+    public float heightMeters = 2.4f;
 }

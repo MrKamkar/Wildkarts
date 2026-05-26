@@ -70,6 +70,8 @@ public class RaceStateSystem extends IteratingSystem {
      */
     private void tickAuthoritativeMirror(RaceComponent race, float deltaTime) {
         switch (race.currentState) {
+            case PRACTICE:
+                break;
             case COUNTDOWN:
                 race.countdownTimer = Math.max(0f, race.countdownTimer - deltaTime);
                 break;

@@ -84,12 +84,8 @@ public class MovementSystem extends IteratingSystem {
 
         float steerRad = car.currentSteeringAngle * MathUtils.degreesToRadians;
         boolean reversing = forwardSpeed < -0.5f;
-        if (reversing) {
-            steerRad = -steerRad;
-        }
         float rearGripMult = input.braking ? car.handbrakeRearGripMultiplier : 1f;
-        // Reduce grip when reversing - less control going backwards
-        float reverseGripMult = reversing ? 0.6f : 1f;
+        float reverseGripMult = reversing ? 0.9f : 1f;
 
         LOCAL_FRONT_AXLE.set(0f, car.frontAxleDistance);
         LOCAL_REAR_AXLE.set(0f, -car.rearAxleDistance);
@@ -169,6 +165,7 @@ public class MovementSystem extends IteratingSystem {
         }
 
         float latDamp = straightMode ? car.stabilityLateralDamping : car.turningLateralDamping;
+        if (reversing) latDamp *= 1.5f;
         force.set(lateralDir).scl(-lateralSpeed * latDamp * forceScale);
         body.applyForceToCenter(force, true);
 
@@ -237,9 +234,6 @@ public class MovementSystem extends IteratingSystem {
 
         float speedFrac = MathUtils.clamp(speedAbs / Math.max(car.steeringYawAssistMaxSpeed, 0.5f), 0f, 1f);
         float steerRad = car.currentSteeringAngle * MathUtils.degreesToRadians;
-        if (forwardSpeed < -0.5f) {
-            steerRad = -steerRad;
-        }
 
         float torque = steerRad * car.steeringYawTorqueGain * speedFrac * forceScale;
         body.applyTorque(torque, true);
@@ -272,7 +266,7 @@ public class MovementSystem extends IteratingSystem {
         if (chassisSpeed < car.alignmentAssistMinSpeed) return;
 
         boolean noSteer = Math.abs(input.steering) < 0.01f;
-        boolean counterSteer = forwardSpeed > 0.5f && isCounterSteering(input.steering, omega, car);
+        boolean counterSteer = Math.abs(forwardSpeed) > 0.5f && isCounterSteering(input.steering, omega, car);
         boolean noThrottle = Math.abs(input.throttle) < 0.05f;
 
         // Driver still pushing hard into the slide (steer + throttle, no kontra) → leave them alone.
@@ -363,9 +357,8 @@ public class MovementSystem extends IteratingSystem {
         boolean pastPeak = absSlip > peak;
         boolean straight = absSlip < car.rearSkidSlipStraightThreshold;
         boolean fastEnough = chassisSpeed >= car.rearSkidMinSpeed;
-        boolean intentionalDrift = Math.abs(input.steering) > 0.01f || input.braking;
 
-        if (straight || !fastEnough || !intentionalDrift) {
+        if (straight || !fastEnough) {
             car.rearSkidActive = false;
             car.rearLeftSkidActive = false;
             car.rearRightSkidActive = false;
@@ -404,7 +397,7 @@ public class MovementSystem extends IteratingSystem {
         // Counter-steer assist: when going forward AND the player flicks steer OPPOSITE to the
         // current yaw direction (and the car is actually spinning), the wheel snaps over fast.
         // This is the keyboard counterpart of a quick wrist flick on a wheel.
-        if (holdingSteer && forwardSpeed > 0.5f && isCounterSteering(input.steering, omega, car)) {
+        if (holdingSteer && Math.abs(forwardSpeed) > 0.5f && isCounterSteering(input.steering, omega, car)) {
             rate *= car.counterSteerSpeedMultiplier;
         }
 

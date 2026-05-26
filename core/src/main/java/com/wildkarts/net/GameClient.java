@@ -30,6 +30,7 @@ public class GameClient {
     public java.util.function.Consumer<RaceStateChangedPacket> onRaceStateChanged;
     public java.util.function.Consumer<SectorTimePacket> onSectorTime;
     public java.util.function.Consumer<RacePositionsUpdatePacket> onRacePositionsUpdate;
+    public java.util.function.Consumer<GridAssignmentPacket> onGridAssignment;
 
     private String[] mapChunks;
     private int receivedChunksCount = 0;
@@ -144,6 +145,12 @@ public class GameClient {
                         RacePositionsUpdatePacket rpp = (RacePositionsUpdatePacket) object;
                         if (onRacePositionsUpdate != null) {
                             Gdx.app.postRunnable(() -> onRacePositionsUpdate.accept(rpp));
+                        }
+                    }
+                    case "GridAssignmentPacket" -> {
+                        GridAssignmentPacket gap = (GridAssignmentPacket) object;
+                        if (onGridAssignment != null) {
+                            Gdx.app.postRunnable(() -> onGridAssignment.accept(gap));
                         }
                     }
                     default -> {}

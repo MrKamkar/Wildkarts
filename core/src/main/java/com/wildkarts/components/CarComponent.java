@@ -32,8 +32,8 @@ public class CarComponent implements Component {
 
     // --- Chassis geometry (meters from CG, body-local +Y forward) ---
 
-    public float frontAxleDistance = 0.65f;
-    public float rearAxleDistance = 0.65f;
+    public float frontAxleDistance = 0.95f;
+    public float rearAxleDistance = 0.95f;
 
     /** Half-track for rear wheels (meters from centerline); 0 = use body width. */
     public float rearWheelHalfTrack = 0f;
@@ -75,22 +75,22 @@ public class CarComponent implements Component {
 
     // --- Pacejka — front axle ---
 
-    public float pacejkaFrontB = 8f;
+    public float pacejkaFrontB = 8.5f;
     public float pacejkaFrontC = 1.3f;
-    /** Front peak grip. Lower than rear = understeer bias. */
-    public float pacejkaFrontD = 200f;
-    public float pacejkaFrontE = -1.2f;
+    /** Front peak grip. Slightly higher than rear = mild oversteer tendency. */
+    public float pacejkaFrontD = 240f;
+    public float pacejkaFrontE = -1.1f;
 
     // --- Pacejka — rear axle ---
 
     public float pacejkaRearB = 8f;
     public float pacejkaRearC = 1.3f;
-    /** Rear peak grip. Higher than front but not too much = balanced with slight oversteer possible. */
-    public float pacejkaRearD = 270f;
-    public float pacejkaRearE = -1.2f;
+    /** Rear peak grip. Slightly lower than front = progressive oversteer under throttle + steering. */
+    public float pacejkaRearD = 230f;
+    public float pacejkaRearE = -1.3f;
 
     /** Rear grip scale while the handbrake is held (drift trigger). */
-    public float handbrakeRearGripMultiplier = 0.42f;
+    public float handbrakeRearGripMultiplier = 0.36f;
     public float pacejkaMinSpeedForGrip = 2.5f;
 
     /** Min |vLong| (m/s) in wheel frame for slip denominator. */
@@ -147,27 +147,27 @@ public class CarComponent implements Component {
     /**
      * Min falloff multiplier past peak — rear. Lower = more drift.
      */
-    public float slideForceFalloffMinRear = 0.78f;
+    public float slideForceFalloffMinRear = 0.72f;
 
     /** Min falloff past peak — front. */
-    public float slideForceFalloffMinFront = 0.85f;
+    public float slideForceFalloffMinFront = 0.84f;
 
-    /** Load transfer to front when turning. Low = tył keeps its grip. */
-    public float turnLoadTransfer = 0.06f;
+    /** Load transfer to front when turning. Higher = more weight on front = less rear grip in turns. */
+    public float turnLoadTransfer = 0.09f;
 
     /** Lateral damping while turning (always on). */
     public float turningLateralDamping = 16f;
 
     /** Extra torque opposing yaw when omega is very large (smooths out rotation). */
-    public float spinAngularDamping = 16f;
+    public float spinAngularDamping = 14f;
     /** Omega (rad/s) at which spinAngularDamping reaches full strength. */
     public float spinDampingOmegaStart = 2.2f;
 
     /** Straight-line: cancels sideslip velocity (N per m/s lateral). */
-    public float stabilityLateralDamping = 22f;
+    public float stabilityLateralDamping = 18f;
 
     /** Engine scale when rear is sliding past peak slip (anti wheel-spin / fish-tail off-road). */
-    public float tractionControlStrength = 0.45f;
+    public float tractionControlStrength = 0.7f;
 
     // --- Simcade drift / counter-steer assists ---
 
@@ -181,7 +181,7 @@ public class CarComponent implements Component {
     /** Min chassis speed (m/s) before any alignment / counter-steer assist kicks in. */
     public float alignmentAssistMinSpeed = 2.5f;
     /** Base torque aligning chassis with velocity vector (N·m per rad sideslip). */
-    public float alignmentAssistStrength = 28f;
+    public float alignmentAssistStrength = 22f;
     /** Boost on alignmentAssistStrength while the driver is countering the current yaw. */
     public float counterSteerAlignmentBoost = 1.8f;
     /** Anti-yaw torque (N·m·s/rad) added when player is fully easing off or counter-steering. */
@@ -206,7 +206,7 @@ public class CarComponent implements Component {
     public float skidmarkSpacing = 0.22f;
 
     /** Width of each single-wheel stripe (meters). */
-    public float skidmarkWheelWidth = 0.11f;
+    public float skidmarkWheelWidth = 0.18f;
 
     public int skidmarkMaxSegmentsPerWheel = 500;
     public float skidmarkFadeSeconds = 12f;

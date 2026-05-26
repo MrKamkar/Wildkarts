@@ -86,8 +86,8 @@ public class GameServer extends ApplicationAdapter {
                     }
                     case "MapReadyPacket" -> {
                         Gdx.app.log("GameServer", "Client " + connection.getID() + " loaded map.");
-                        // Map loaded — let the client into the race lobby.
                         reliabilityManager.send(connection, new StartGamePacket());
+                        raceManager.onPlayerMapLoaded(connection);
                     }
                     case "PlayerPositionPacket" -> {
                         // Relay to peers AND feed the race manager so it can validate point passes.
