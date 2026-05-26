@@ -17,6 +17,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import com.wildkarts.net.GameClient;
 
@@ -31,13 +32,14 @@ public class MainMenuScreen implements Screen {
 
     // Disposable resources created programmatically
     private BitmapFont font;
+    private Texture backgroundTexture;
     private Texture buttonUpTexture;
     private Texture buttonDownTexture;
     private Texture singlePlayerUpTexture;
     private Texture singlePlayerDownTexture;
     private Texture textFieldBgTexture;
     private Texture cursorTexture;
-    
+
     private Label statusLabel;
 
     public MainMenuScreen(Game game) {
@@ -49,18 +51,21 @@ public class MainMenuScreen implements Screen {
         stage = new Stage(new ScreenViewport());
         Gdx.input.setInputProcessor(stage);
 
+        // --- Load background ---
+        backgroundTexture = new Texture(Gdx.files.internal("textures/background_menu.png"));
+
         // --- Create font ---
-        font = new BitmapFont(); // default Arial-like 15px bitmap font
+        font = new BitmapFont();
 
         // --- Create button textures programmatically ---
-        buttonUpTexture = createColorTexture(1, 1, new Color(0.3f, 0.3f, 0.35f, 1f));
-        buttonDownTexture = createColorTexture(1, 1, new Color(0.5f, 0.5f, 0.55f, 1f));
-        singlePlayerUpTexture = createColorTexture(1, 1, new Color(0.15f, 0.55f, 0.25f, 1f));
-        singlePlayerDownTexture = createColorTexture(1, 1, new Color(0.2f, 0.7f, 0.35f, 1f));
-        textFieldBgTexture = createColorTexture(1, 1, new Color(0.2f, 0.2f, 0.25f, 1f));
+        buttonUpTexture = createColorTexture(1, 1, new Color(0.25f, 0.25f, 0.3f, 0.85f));
+        buttonDownTexture = createColorTexture(1, 1, new Color(0.45f, 0.45f, 0.5f, 0.9f));
+        singlePlayerUpTexture = createColorTexture(1, 1, new Color(0.12f, 0.5f, 0.22f, 0.85f));
+        singlePlayerDownTexture = createColorTexture(1, 1, new Color(0.18f, 0.65f, 0.3f, 0.9f));
+        textFieldBgTexture = createColorTexture(1, 1, new Color(0.15f, 0.15f, 0.2f, 0.8f));
         cursorTexture = createColorTexture(2, 15, Color.WHITE);
 
-        // --- TextButton style (no skin needed) ---
+        // --- TextButton style ---
         TextButton.TextButtonStyle buttonStyle = new TextButton.TextButtonStyle();
         buttonStyle.font = font;
         buttonStyle.fontColor = Color.WHITE;
@@ -80,12 +85,7 @@ public class MainMenuScreen implements Screen {
         textFieldStyle.fontColor = Color.WHITE;
         textFieldStyle.background = new TextureRegionDrawable(new TextureRegion(textFieldBgTexture));
         textFieldStyle.cursor = new TextureRegionDrawable(new TextureRegion(cursorTexture));
-
-        // --- Title label ---
-        Label.LabelStyle titleStyle = new Label.LabelStyle();
-        titleStyle.font = font;
-        titleStyle.fontColor = Color.GOLD;
-        Label titleLabel = new Label("WILDKARTS", titleStyle);
+        textFieldStyle.messageFontColor = new Color(0.6f, 0.6f, 0.6f, 1f);
 
         // --- Nick Input Field ---
         TextField nickField = new TextField("", textFieldStyle);
@@ -117,35 +117,35 @@ public class MainMenuScreen implements Screen {
             public void clicked(InputEvent event, float x, float y) {
                 statusLabel.setText("Connecting...");
                 connectButton.setDisabled(true);
-                
+
                 GameClient client = new GameClient();
                 String nick = nickField.getText().trim();
                 if (nick.isEmpty()) nick = nickField.getMessageText();
                 client.playerName = nick;
                 ((WildKartsGame) game).setGameClient(client);
-                
+
                 client.onJoinAccepted = () -> {
                     game.setScreen(new GameScreen((WildKartsGame) game, true));
                     dispose();
                 };
-                
+
                 client.onConnectionFailed = () -> {
                     statusLabel.setText("Connection failed.");
                     connectButton.setDisabled(false);
                 };
-                
+
                 client.onDisconnected = () -> {
                     Screen oldScreen = game.getScreen();
                     game.setScreen(new MainMenuScreen(game));
                     if (oldScreen != null) oldScreen.dispose();
                 };
-                
+
                 client.connect(ipField.getText());
             }
         });
 
         // --- Exit button ---
-        TextButton exitButton = new TextButton("Exit", buttonStyle);
+        TextButton exitButton = new TextButton("EXIT", buttonStyle);
         exitButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -153,26 +153,33 @@ public class MainMenuScreen implements Screen {
             }
         });
 
-        // --- Layout with Table ---
-        Table table = new Table();
-        table.setFillParent(true);
-        table.center();
+        // --- Root table with background image ---
+        Table rootTable = new Table();
+        rootTable.setFillParent(true);
+        rootTable.setBackground(new TextureRegionDrawable(new TextureRegion(backgroundTexture)));
 
-        table.add(titleLabel).padBottom(40f).row();
-        table.add(singlePlayerButton).width(250f).height(60f).padBottom(30f).row();
-        table.add(nickField).width(250f).height(40f).padBottom(10f).row();
-        table.add(ipField).width(250f).height(40f).padBottom(10f).row();
-        table.add(connectButton).width(250f).height(50f).padBottom(10f).row();
-        table.add(statusLabel).padBottom(20f).row();
-        table.add(exitButton).width(200f).height(50f);
+        // --- Content table centered on the asphalt area ---
+        Table content = new Table();
+        content.center().left();
+        content.padLeft(100f).padTop(300f);
 
-        stage.addActor(table);
+        Label.LabelStyle nickLabelStyle = new Label.LabelStyle();
+        nickLabelStyle.font = font;
+        nickLabelStyle.fontColor = Color.LIGHT_GRAY;
+
+        content.add(new Label("NICK:", nickLabelStyle)).left().padBottom(6f).row();
+        content.add(nickField).width(360f).height(52f).left().padBottom(24f).row();
+        content.add(new Label("SERVER IP:", nickLabelStyle)).left().padBottom(6f).row();
+        content.add(ipField).width(360f).height(52f).left().padBottom(30f).row();
+        content.add(connectButton).width(360f).height(64f).left().padBottom(24f).row();
+        content.add(singlePlayerButton).width(360f).height(64f).left().padBottom(24f).row();
+        content.add(exitButton).width(360f).height(64f).left().padBottom(20f).row();
+        content.add(statusLabel).left();
+
+        rootTable.add(content).expand().top().left();
+        stage.addActor(rootTable);
     }
 
-    /**
-     * Creates a 1×1 pixel texture filled with the given color.
-     * Used to build simple drawable backgrounds for buttons.
-     */
     private Texture createColorTexture(int width, int height, Color color) {
         Pixmap pixmap = new Pixmap(width, height, Pixmap.Format.RGBA8888);
         pixmap.setColor(color);
@@ -184,7 +191,7 @@ public class MainMenuScreen implements Screen {
 
     @Override
     public void render(float delta) {
-        Gdx.gl.glClearColor(0.1f, 0.1f, 0.12f, 1f);
+        Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
         stage.act(delta);
@@ -212,6 +219,7 @@ public class MainMenuScreen implements Screen {
     public void dispose() {
         if (stage != null) stage.dispose();
         if (font != null) font.dispose();
+        if (backgroundTexture != null) backgroundTexture.dispose();
         if (buttonUpTexture != null) buttonUpTexture.dispose();
         if (buttonDownTexture != null) buttonDownTexture.dispose();
         if (singlePlayerUpTexture != null) singlePlayerUpTexture.dispose();
