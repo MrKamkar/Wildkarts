@@ -7,8 +7,11 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.Texture.TextureFilter;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
+import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator.FreeTypeFontParameter;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -18,7 +21,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
-import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.wildkarts.net.GameClient;
 
 /**
@@ -31,6 +34,7 @@ public class MainMenuScreen implements Screen {
     private Stage stage;
 
     // Disposable resources created programmatically
+    private FreeTypeFontGenerator fontGenerator;
     private BitmapFont font;
     private Texture backgroundTexture;
     private Texture buttonUpTexture;
@@ -48,14 +52,14 @@ public class MainMenuScreen implements Screen {
 
     @Override
     public void show() {
-        stage = new Stage(new ScreenViewport());
+        stage = new Stage(new FitViewport(1920, 1080));
         Gdx.input.setInputProcessor(stage);
 
         // --- Load background ---
         backgroundTexture = new Texture(Gdx.files.internal("textures/background_menu.png"));
 
-        // --- Create font ---
-        font = new BitmapFont();
+        // --- Create font (FreeType for sharp rendering at any scale) ---
+        font = createFont(28);
 
         // --- Create button textures programmatically ---
         buttonUpTexture = createColorTexture(1, 1, new Color(0.25f, 0.25f, 0.3f, 0.85f));
@@ -180,6 +184,22 @@ public class MainMenuScreen implements Screen {
         stage.addActor(rootTable);
     }
 
+    private BitmapFont createFont(int size) {
+        if (Gdx.files.internal("fonts/Roboto-Medium.ttf").exists()) {
+            fontGenerator = new FreeTypeFontGenerator(Gdx.files.internal("fonts/Roboto-Medium.ttf"));
+            FreeTypeFontParameter param = new FreeTypeFontParameter();
+            param.size = size;
+            param.minFilter = TextureFilter.Linear;
+            param.magFilter = TextureFilter.Linear;
+            return fontGenerator.generateFont(param);
+        }
+        // Fallback: default BitmapFont with linear filtering
+        BitmapFont fallback = new BitmapFont();
+        fallback.getRegion().getTexture().setFilter(TextureFilter.Linear, TextureFilter.Linear);
+        fallback.getData().setScale(size / 15f);
+        return fallback;
+    }
+
     private Texture createColorTexture(int width, int height, Color color) {
         Pixmap pixmap = new Pixmap(width, height, Pixmap.Format.RGBA8888);
         pixmap.setColor(color);
@@ -219,6 +239,7 @@ public class MainMenuScreen implements Screen {
     public void dispose() {
         if (stage != null) stage.dispose();
         if (font != null) font.dispose();
+        if (fontGenerator != null) fontGenerator.dispose();
         if (backgroundTexture != null) backgroundTexture.dispose();
         if (buttonUpTexture != null) buttonUpTexture.dispose();
         if (buttonDownTexture != null) buttonDownTexture.dispose();

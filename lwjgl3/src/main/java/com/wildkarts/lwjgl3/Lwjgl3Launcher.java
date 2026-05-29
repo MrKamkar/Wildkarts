@@ -20,6 +20,8 @@ public class Lwjgl3Launcher {
         // Smooth window resize
         config.setWindowSizeLimits(640, 360, -1, -1);
 
+        config.setWindowIcon("textures/icon.png");
+
         new Lwjgl3Application(new WildKartsGame(), config);
     }
 }
