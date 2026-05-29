@@ -50,6 +50,7 @@ import com.wildkarts.net.packets.MapReadyPacket;
 import com.wildkarts.net.packets.PlayerPositionPacket;
 import com.wildkarts.net.packets.PlayerReadyPacket;
 import com.wildkarts.systems.CarDebugRenderSystem;
+import com.wildkarts.systems.DriftSoundSystem;
 import com.wildkarts.systems.HudRenderSystem;
 import com.wildkarts.systems.InputSystem;
 import com.wildkarts.systems.LapSectorSystem;
@@ -121,6 +122,7 @@ public class GameScreen extends ScreenAdapter {
     private SkidmarkSystem skidmarkSystem;
     private CarDebugRenderSystem carDebugRenderSystem;
     private HudRenderSystem hudRenderSystem;
+    private DriftSoundSystem driftSoundSystem;
     private PhysicsSystem physicsSystem;
 
     // Race manager entity (singleton, carries RaceComponent)
@@ -242,6 +244,9 @@ public class GameScreen extends ScreenAdapter {
         hudRenderSystem = new HudRenderSystem();
         hudRenderSystem.priority = 7;
 
+        driftSoundSystem = new DriftSoundSystem();
+        driftSoundSystem.priority = 8;
+
         engine.addSystem(raceStateSystem);
         engine.addSystem(inputSystem);
         engine.addSystem(terrainSystem);
@@ -259,6 +264,7 @@ public class GameScreen extends ScreenAdapter {
         engine.addSystem(renderSystem);
         engine.addSystem(carDebugRenderSystem);
         engine.addSystem(hudRenderSystem);
+        engine.addSystem(driftSoundSystem);
 
         // --- Setup UI ---
         uiFont = new BitmapFont();
@@ -1285,6 +1291,7 @@ public class GameScreen extends ScreenAdapter {
         if (skidmarkSystem != null) skidmarkSystem.dispose();
         if (carDebugRenderSystem != null) carDebugRenderSystem.dispose();
         if (hudRenderSystem != null) hudRenderSystem.dispose();
+        if (driftSoundSystem != null) driftSoundSystem.dispose();
         trackRenderer.dispose();
         world.dispose();
 
