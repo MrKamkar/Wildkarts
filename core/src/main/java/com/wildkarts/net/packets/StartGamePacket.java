@@ -3,9 +3,11 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Sent by server to client to signal that the game should start (spawn car, enable controls).
+ * Wysyłany przez serwer do klienta — sygnał rozpoczęcia gry (spawn auta, włączenie sterowania).
  */
 public class StartGamePacket extends ReliablePacket {
+
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public StartGamePacket() {
     }
 }

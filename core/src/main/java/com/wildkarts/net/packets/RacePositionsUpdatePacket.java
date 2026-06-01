@@ -3,19 +3,28 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.UnreliablePacket;
 
 /**
- * Server -> all clients: leaderboard snapshot. Parallel arrays describe
- * every connected player. Sent at ~6 Hz (every Nth server tick) over UDP.
+ * Serwer → wszyscy klienci: migawka klasyfikacji wyścigu.
+ * Równoległe tablice opisują każdego połączonego gracza.
+ * Wysyłane ok. 6 Hz (co N-ty tick serwera) przez UDP.
  *
- * All arrays have the same length. Index {@code i} describes the same
- * player across all four arrays.
+ * <p>Wszystkie tablice mają tę samą długość. Indeks {@code i} opisuje tego samego
+ * gracza we wszystkich czterech tablicach.</p>
  */
 public class RacePositionsUpdatePacket extends UnreliablePacket {
 
+    /** Identyfikatory graczy. */
     public int[] playerIds;
+
+    /** Aktualne pozycje wyścigowe (1 = lider). */
     public int[] positions;
+
+    /** Aktualne okrążenia graczy. */
     public int[] currentLaps;
+
+    /** Indeksy następnych punktów kontrolnych. */
     public int[] nextTrackPointIndices;
 
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public RacePositionsUpdatePacket() {
     }
 }

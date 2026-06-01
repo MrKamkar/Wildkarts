@@ -17,7 +17,7 @@ import com.wildkarts.components.CarComponent;
 import com.wildkarts.components.InputComponent;
 
 /**
- * Pacejka debug — curve and yellow dot use the same {@link PacejkaTireModel} pipeline as physics.
+ * Debug Pacejki — krzywa i żółta kropka używają tego samego pipeline'u co {@link PacejkaTireModel}.
  */
 public class CarDebugRenderSystem extends IteratingSystem {
 
@@ -30,6 +30,11 @@ public class CarDebugRenderSystem extends IteratingSystem {
 
     private Entity trackedEntity;
 
+    /**
+     * Tworzy system overlay debug powiązany z kamerą świata.
+     *
+     * @param worldCamera kamera ortograficzna świata (używana pośrednio przez viewport HUD)
+     */
     public CarDebugRenderSystem(OrthographicCamera worldCamera) {
         super(Family.all(InputComponent.class, CarComponent.class).get());
         this.hudViewport = new ScreenViewport();
@@ -40,6 +45,7 @@ public class CarDebugRenderSystem extends IteratingSystem {
         font.getData().setScale(1.1f);
     }
 
+    /** Rysuje HUD tekstowy i opcjonalnie krzywe Pacejki dla śledzonego auta. */
     @Override
     public void update(float deltaTime) {
         trackedEntity = null;
@@ -51,16 +57,17 @@ public class CarDebugRenderSystem extends IteratingSystem {
 
         hudViewport.apply();
         drawHud(car);
-        if (car.debugDrawPacejkaCurve) {
+        if (car.debugDrawPacejkaCurve)
             drawPacejkaCurves(car);
-        }
     }
 
+    /** Zapamiętuje ostatnio przetworzoną encję (lokalne auto gracza). */
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         trackedEntity = entity;
     }
 
+    /** Rysuje panel tekstowy z parametrami poślizgu i sił bocznych. */
     private void drawHud(CarComponent car) {
         PacejkaTireModel.AxleRuntime frontRt = car.frontTireRuntime;
         PacejkaTireModel.AxleRuntime rearRt = car.rearTireRuntime;
@@ -97,6 +104,7 @@ public class CarDebugRenderSystem extends IteratingSystem {
 
     private float[] dotPositions = new float[4];
 
+    /** Rysuje dwie krzywe Pacejki (przód/tył) i pozycje kropek bieżącego poślizgu. */
     private void drawPacejkaCurves(CarComponent car) {
         float x = car.debugHudX;
         float y = Gdx.graphics.getHeight() - car.debugHudY - 290f;
@@ -109,7 +117,6 @@ public class CarDebugRenderSystem extends IteratingSystem {
 
         shapeRenderer.setProjectionMatrix(hudViewport.getCamera().combined);
 
-        // Draw curves (lines)
         shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
         shapeRenderer.setColor(0.4f, 0.8f, 1f, 0.9f);
         drawPacejkaCurve(x, y, w, h, alphaMax, frontCfg, car, car.frontTireRuntime, car.frontSlipAngleEffective, 0);
@@ -117,7 +124,6 @@ public class CarDebugRenderSystem extends IteratingSystem {
         drawPacejkaCurve(x + w + 16f, y, w, h, alphaMax, rearCfg, car, car.rearTireRuntime, car.rearSlipAngleEffective, 1);
         shapeRenderer.end();
 
-        // Draw filled dots
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         shapeRenderer.setColor(1f, 1f, 0.2f, 1f);
         shapeRenderer.circle(dotPositions[0], dotPositions[1], 5f);
@@ -125,6 +131,7 @@ public class CarDebugRenderSystem extends IteratingSystem {
         shapeRenderer.end();
     }
 
+    /** Buduje konfigurację osi z parametrów {@link CarComponent}. */
     private static PacejkaTireModel.AxleConfig buildConfig(CarComponent car, boolean front) {
         PacejkaTireModel.AxleConfig cfg = new PacejkaTireModel.AxleConfig();
         if (front) {
@@ -146,8 +153,8 @@ public class CarDebugRenderSystem extends IteratingSystem {
     }
 
     /**
-     * Curve and dot share physics multipliers (mu, load, grip, lowSpeed, forceScale).
-     * Slide falloff varies per sampled alpha; dot uses live effective slip + applied Fy.
+     * Rysuje krzywą siły bocznej i zapisuje pozycję kropki bieżącego poślizgu.
+     * Krzywa i kropka używają tych samych mnożników co fizyka.
      */
     private void drawPacejkaCurve(float ox, float oy, float w, float h, float alphaMax,
                                   PacejkaTireModel.AxleConfig cfg, CarComponent car,
@@ -170,15 +177,13 @@ public class CarDebugRenderSystem extends IteratingSystem {
             float px = ox + (alpha / alphaMax + 1f) * 0.5f * w;
             float py = oy + (fy / maxF + 1f) * 0.5f * h;
 
-            if (!first) {
+            if (!first)
                 shapeRenderer.line(prevPx, prevPy, px, py);
-            }
             prevPx = px;
             prevPy = py;
             first = false;
         }
 
-        // Store dot position for filled drawing later
         curveRt.slideMult = PacejkaTireModel.slideForceFalloff(Math.abs(dotAlphaEff), cfg.peakSlipAngle,
                 car.pacejkaMaxSlipAngle, cfg.slideFalloffMin);
         float dotFyRecomputed = PacejkaTireModel.curveFyAtSlip(dotAlphaEff, cfg, curveRt, forceScale);
@@ -186,10 +191,17 @@ public class CarDebugRenderSystem extends IteratingSystem {
         dotPositions[dotIndex * 2 + 1] = oy + (dotFyRecomputed / maxF + 1f) * 0.5f * h;
     }
 
+    /**
+     * Dopasowuje viewport HUD po zmianie rozmiaru okna.
+     *
+     * @param width  nowa szerokość
+     * @param height nowa wysokość
+     */
     public void resize(int width, int height) {
         hudViewport.update(width, height, true);
     }
 
+    /** Kopiuje stan runtime osi do rysowania krzywej (slideMult nadpisywany per próbka). */
     private static PacejkaTireModel.AxleRuntime copyRuntimeForCurve(PacejkaTireModel.AxleRuntime src) {
         PacejkaTireModel.AxleRuntime rt = new PacejkaTireModel.AxleRuntime();
         rt.mu = src.mu;
@@ -201,6 +213,7 @@ public class CarDebugRenderSystem extends IteratingSystem {
         return rt;
     }
 
+    /** Zwalnia zasoby batch, czcionki i shape renderera. */
     public void dispose() {
         batch.dispose();
         font.dispose();

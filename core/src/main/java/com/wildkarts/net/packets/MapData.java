@@ -3,22 +3,30 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Contains a chunk of the track JSON data.
+ * Zawiera fragment danych JSON toru.
  */
 public class MapData extends ReliablePacket {
 
-    /** Total number of chunks for this map. */
+    /** Łączna liczba fragmentów tej mapy. */
     public int totalChunks;
 
-    /** Current chunk index (0 to totalChunks-1). */
+    /** Indeks bieżącego fragmentu (0 … totalChunks-1). */
     public int chunkIndex;
 
-    /** The actual JSON string fragment. */
+    /** Fragment ciągu JSON. */
     public String data;
 
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public MapData() {
     }
 
+    /**
+     * Tworzy jeden fragment danych mapy.
+     *
+     * @param totalChunks łączna liczba fragmentów
+     * @param chunkIndex  indeks tego fragmentu
+     * @param data        zawartość fragmentu JSON
+     */
     public MapData(int totalChunks, int chunkIndex, String data) {
         this.totalChunks = totalChunks;
         this.chunkIndex = chunkIndex;

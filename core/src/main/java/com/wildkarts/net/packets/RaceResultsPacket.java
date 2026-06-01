@@ -3,20 +3,21 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Server -> All clients: sent when the race reaches FINISHED state.
- * Contains the final standings so clients can display a leaderboard.
+ * Serwer → wszyscy klienci: wysyłany po osiągnięciu fazy {@link com.wildkarts.components.RaceState#FINISHED}.
+ * Zawiera końcową klasyfikację do wyświetlenia tabeli wyników.
  */
 public class RaceResultsPacket extends ReliablePacket {
 
-    /** Ordered player IDs (index 0 = 1st place). */
+    /** Posortowane identyfikatory graczy (indeks 0 = 1. miejsce). */
     public int[] playerIds;
 
-    /** Player names in the same order. */
+    /** Nazwy graczy w tej samej kolejności. */
     public String[] playerNames;
 
-    /** Final race times (seconds) for each player. 0 if DNF. */
+    /** Końcowe czasy wyścigu (s) dla każdego gracza. 0 przy DNF. */
     public float[] finishTimes;
 
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public RaceResultsPacket() {
     }
 }

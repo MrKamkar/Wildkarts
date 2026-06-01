@@ -3,26 +3,39 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Client -> Server: the client believes it has reached the track point
- * {@code pointIndex} (which equals its current {@code nextTrackPointIndex}).
- * The server validates against its last known position for this player
- * and, on success, applies lap / sector / finish logic authoritatively.
+ * Klient → serwer: klient uważa, że minął punkt toru {@code pointIndex}
+ * (równy jego {@code nextTrackPointIndex}).
+ * Serwer weryfikuje względem ostatniej znanej pozycji gracza
+ * i po sukcesie autorytatywnie stosuje logikę okrążeń / sektorów / mety.
  *
- * Sent as a reliable packet so a momentary UDP loss does not cause a
- * missed checkpoint.
+ * <p>Pakiet niezawodny — chwilowa utrata UDP nie powoduje pominięcia checkpointu.</p>
  */
 public class PlayerPassedPointPacket extends ReliablePacket {
 
+    /** Identyfikator gracza zgłaszającego minięcie punktu. */
     public int playerId;
+
+    /** Indeks miniętego punktu kontrolnego. */
     public int pointIndex;
 
-    /** Player position at the moment of detection (used for validation). */
+    /** Pozycja gracza w momencie wykrycia (do walidacji). */
     public float x;
+
+    /** Pozycja gracza w momencie wykrycia (do walidacji). */
     public float y;
 
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public PlayerPassedPointPacket() {
     }
 
+    /**
+     * Tworzy zgłoszenie minięcia punktu kontrolnego.
+     *
+     * @param playerId   identyfikator gracza
+     * @param pointIndex indeks punktu
+     * @param x          pozycja X
+     * @param y          pozycja Y
+     */
     public PlayerPassedPointPacket(int playerId, int pointIndex, float x, float y) {
         this.playerId = playerId;
         this.pointIndex = pointIndex;

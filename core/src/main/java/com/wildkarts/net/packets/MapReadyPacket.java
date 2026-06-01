@@ -3,9 +3,11 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Sent by client to server when the map has been fully reconstructed and built.
+ * Wysyłany przez klienta do serwera, gdy mapa została w pełni zrekonstruowana i zbudowana.
  */
 public class MapReadyPacket extends ReliablePacket {
+
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public MapReadyPacket() {
     }
 }

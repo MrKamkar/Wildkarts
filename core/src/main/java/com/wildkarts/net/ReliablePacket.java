@@ -1,11 +1,11 @@
 package com.wildkarts.net;
 
 /**
- * Marker base class for packets that MUST be acknowledged.
- * The UdpReliabilityManager will retransmit these until an AckPacket
- * with the matching sequenceId is received.
+ * Klasa bazowa pakietów wymagających potwierdzenia (ACK).
+ * {@link UdpReliabilityManager} retransmituje je, dopóki nie otrzyma {@link AckPacket}
+ * z pasującym {@code sequenceId}.
  *
- * Examples: JoinRequest, MapData, PowerUpUsed.
+ * <p>Przykłady: {@link com.wildkarts.net.packets.JoinRequest}, {@link com.wildkarts.net.packets.MapData}.</p>
  */
 public abstract class ReliablePacket extends NetPacket {
 }

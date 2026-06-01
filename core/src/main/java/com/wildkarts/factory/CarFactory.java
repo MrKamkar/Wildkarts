@@ -3,50 +3,57 @@ package com.wildkarts.factory;
 import com.badlogic.ashley.core.Engine;
 import com.badlogic.ashley.core.Entity;
 import com.badlogic.gdx.math.Vector2;
-import com.badlogic.gdx.physics.box2d.*;
+import com.badlogic.gdx.physics.box2d.Body;
+import com.badlogic.gdx.physics.box2d.BodyDef;
+import com.badlogic.gdx.physics.box2d.FixtureDef;
+import com.badlogic.gdx.physics.box2d.MassData;
+import com.badlogic.gdx.physics.box2d.PolygonShape;
+import com.badlogic.gdx.physics.box2d.World;
 import com.wildkarts.components.CarComponent;
 import com.wildkarts.components.InputComponent;
+import com.wildkarts.components.NetworkSyncComponent;
 import com.wildkarts.components.PhysicsComponent;
 
 /**
- * Factory for creating car entities with all required components and Box2D body.
- * 
- * Centralizes entity creation — easy to extend for different car types,
- * AI opponents, or multiplayer remote players.
+ * Fabryka encji aut z wymaganymi komponentami i ciałem Box2D.
+ *
+ * <p>Centralizuje tworzenie encji — łatwo rozszerzyć o różne typy aut,
+ * przeciwników AI lub zdalnych graczy w multiplayerze.</p>
  */
 public class CarFactory {
 
     private final World world;
     private final Engine engine;
 
+    /**
+     * Tworzy fabrykę powiązaną ze światem fizyki i silnikiem Ashley.
+     *
+     * @param world  świat Box2D
+     * @param engine silnik encji Ashley
+     */
     public CarFactory(World world, Engine engine) {
         this.world = world;
         this.engine = engine;
     }
 
     /**
-     * Creates a complete car entity at the given position.
+     * Tworzy kompletne auto w podanej pozycji z domyślnymi parametrami.
      *
-     * @param x      Starting X position in world meters
-     * @param y      Starting Y position in world meters
-     * @param angle  Starting angle in radians
-     * @return The created entity (already added to Engine)
+     * @param x     pozycja startowa X w metrach świata
+     * @param y     pozycja startowa Y w metrach świata
+     * @param angle kąt startowy w radianach
+     * @return utworzona encja (już dodana do silnika)
      */
     public Entity createCar(float x, float y, float angle) {
         Entity entity = new Entity();
 
-        // --- Components ---
         InputComponent input = new InputComponent();
         CarComponent car = new CarComponent();
         PhysicsComponent physics = new PhysicsComponent();
 
-        // --- Create Box2D body ---
         physics.body = createCarBody(x, y, angle, physics.widthMeters, physics.heightMeters, car);
-
-        // Store entity reference in body's user data (useful for collision callbacks)
         physics.body.setUserData(entity);
 
-        // --- Assemble entity ---
         physics.prevPosition.set(x, y);
         physics.prevAngle = angle;
         entity.add(input);
@@ -58,8 +65,14 @@ public class CarFactory {
     }
 
     /**
-     * Creates a car with custom tuning parameters.
-     * Useful for different vehicle classes (light, heavy, drift-focused, etc.)
+     * Tworzy auto z niestandardowymi parametrami {@link CarComponent}.
+     * Przydatne dla różnych klas pojazdów (lekkie, ciężkie, driftowe itd.).
+     *
+     * @param x          pozycja startowa X
+     * @param y          pozycja startowa Y
+     * @param angle      kąt startowy w radianach
+     * @param customCar  wstępnie skonfigurowany komponent auta
+     * @return utworzona encja (już dodana do silnika)
      */
     public Entity createCar(float x, float y, float angle, CarComponent customCar) {
         Entity entity = new Entity();
@@ -79,33 +92,26 @@ public class CarFactory {
     }
 
     /**
-     * Creates the Box2D dynamic body for a car.
-     * 
-     * Body configuration:
-     * - Dynamic type (responds to forces)
-     * - Rectangle shape (PolygonShape)
-     * - Linear/angular damping from CarComponent (controls drag)
-     * - Moderate density for realistic mass
-     * - Low restitution (cars don't bounce much)
+     * Tworzy dynamiczne ciało Box2D dla auta.
+     *
+     * <p>Konfiguracja: typ dynamiczny, kształt prostokątny, tłumienie z {@link CarComponent},
+     * umiarkowana gęstość, niska restytucja (auta mało odbijają).</p>
      */
     private Body createCarBody(float x, float y, float angle,
                                float width, float height, CarComponent car) {
-        // Body definition
         BodyDef bodyDef = new BodyDef();
         bodyDef.type = BodyDef.BodyType.DynamicBody;
         bodyDef.position.set(x, y);
         bodyDef.angle = angle;
         bodyDef.linearDamping = car.linearDamping;
         bodyDef.angularDamping = car.angularDamping;
-        bodyDef.bullet = true; // Prevents tunneling at high speeds
+        bodyDef.bullet = true;
 
         Body body = world.createBody(bodyDef);
 
-        // Shape — rectangle centered on body
         PolygonShape shape = new PolygonShape();
         shape.setAsBox(width / 2f, height / 2f);
 
-        // Fixture definition (density placeholder — mass is overridden below)
         FixtureDef fixtureDef = new FixtureDef();
         fixtureDef.shape = shape;
         fixtureDef.density = 1.0f;
@@ -116,9 +122,8 @@ public class CarFactory {
         shape.dispose();
 
         float inertia = car.inertia;
-        if (inertia <= 0f) {
+        if (inertia <= 0f)
             inertia = (1f / 12f) * car.mass * (width * width + height * height);
-        }
         MassData massData = new MassData();
         massData.mass = car.mass;
         massData.I = inertia;
@@ -129,13 +134,18 @@ public class CarFactory {
     }
 
     /**
-     * Creates a remote player car driven by network updates.
-     * It does not have an InputComponent.
+     * Tworzy auto zdalnego gracza sterowane aktualizacjami sieciowymi.
+     * Nie ma {@link InputComponent}, ale ma {@link NetworkSyncComponent}.
+     *
+     * @param x     pozycja startowa X
+     * @param y     pozycja startowa Y
+     * @param angle kąt startowy w radianach
+     * @return encja zdalnego gracza
      */
     public Entity createRemoteCar(float x, float y, float angle) {
         Entity entity = createCar(x, y, angle);
         entity.remove(InputComponent.class);
-        entity.add(new com.wildkarts.components.NetworkSyncComponent());
+        entity.add(new NetworkSyncComponent());
         return entity;
     }
 }

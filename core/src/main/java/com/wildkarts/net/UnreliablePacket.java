@@ -1,10 +1,10 @@
 package com.wildkarts.net;
 
 /**
- * Base class for high-frequency, fire-and-forget packets.
- * No ACK is expected — if the packet is lost, a newer one will replace it.
+ * Klasa bazowa pakietów wysyłanych często, bez oczekiwania na ACK.
+ * Utrata pakietu nie jest krytyczna — kolejny zawiera świeższe dane.
  *
- * Examples: PlayerPositionPacket (sent every frame).
+ * <p>Przykład: {@link com.wildkarts.net.packets.PlayerPositionPacket} (co klatkę).</p>
  */
 public abstract class UnreliablePacket extends NetPacket {
 }

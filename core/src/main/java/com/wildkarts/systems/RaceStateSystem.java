@@ -9,24 +9,28 @@ import com.wildkarts.components.RaceComponent;
 import com.wildkarts.components.RaceState;
 
 /**
- * Drives the race lifecycle finite state machine:
+ * Steruje maszyną stanów wyścigu:
  * <pre>
- *   WAITING_FOR_PLAYERS  --(all ready)-->  COUNTDOWN
- *   PRACTICE             --(all ready)-->  COUNTDOWN
- *   COUNTDOWN            --(timer == 0)--> RACING
- *   RACING               --(lap > max)--> FINISHED   (set by LapSectorSystem)
+ *   WAITING_FOR_PLAYERS  --(wszyscy gotowi)-->  COUNTDOWN
+ *   PRACTICE             --(wszyscy gotowi)-->  COUNTDOWN
+ *   COUNTDOWN            --(timer == 0)-->       RACING
+ *   RACING               --(lap > max)-->       FINISHED   (ustawiane przez LapSectorSystem)
  * </pre>
- * Processes the singleton entity carrying {@link RaceComponent}.
+ * Przetwarza pojedynczą encję z {@link RaceComponent}.
  */
 public class RaceStateSystem extends IteratingSystem {
 
     private final ComponentMapper<RaceComponent> raceMapper =
             ComponentMapper.getFor(RaceComponent.class);
 
+    /** Tworzy system dla encji menedżera wyścigu. */
     public RaceStateSystem() {
         super(Family.all(RaceComponent.class).get());
     }
 
+    /**
+     * Aktualizuje fazę wyścigu i timery (lokalnie lub jako lustro serwera).
+     */
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         RaceComponent race = raceMapper.get(entity);
@@ -61,15 +65,13 @@ public class RaceStateSystem extends IteratingSystem {
                 break;
 
             default:
-                // FINISHED — no automatic transitions out
                 break;
         }
     }
 
     /**
-     * In server-authoritative (multiplayer) mode we only tick timers so the
-     * HUD shows smooth values between server packets. State transitions are
-     * driven exclusively by RaceStateChangedPacket.
+     * W trybie autorytetu serwera tylko płynnie odlicza timery między pakietami.
+     * Przejścia stanów pochodzą wyłącznie z {@link com.wildkarts.net.packets.RaceStateChangedPacket}.
      */
     private void tickAuthoritativeMirror(RaceComponent race, float deltaTime) {
         switch (race.currentState) {

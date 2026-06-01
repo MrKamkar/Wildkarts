@@ -12,7 +12,7 @@ import com.wildkarts.components.InputComponent;
 import com.wildkarts.components.PhysicsComponent;
 
 /**
- * Vehicle physics — Pacejka with standard bicycle-model slip angles.
+ * Fizyka pojazdu — model Pacejki z kątami poślizgu w układzie rowerowym (bicycle model).
  */
 public class MovementSystem extends IteratingSystem {
 
@@ -39,10 +39,19 @@ public class MovementSystem extends IteratingSystem {
     private static final Vector2 wheelForward = new Vector2();
     private static final Vector2 wheelLateral = new Vector2();
 
+    /**
+     * Tworzy system przetwarzający encje z wejściem, parametrami auta i ciałem Box2D.
+     */
     public MovementSystem() {
         super(Family.all(InputComponent.class, CarComponent.class, PhysicsComponent.class).get());
     }
 
+    /**
+     * Aktualizuje kąt skrętu kół na podstawie wejścia gracza (wywoływane co klatkę).
+     *
+     * @param entity    encja samochodu
+     * @param deltaTime czas od ostatniej klatki w sekundach
+     */
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         InputComponent input = inputMapper.get(entity);
@@ -61,6 +70,15 @@ public class MovementSystem extends IteratingSystem {
         updateSteering(car, input, forwardSpeed, speedAbs, speedMult, omega, deltaTime);
     }
 
+    /**
+     * Wykonuje pełny krok fizyki samochodu — siły boczne Pacejki, napęd, opory i asysty simcade.
+     * Wywoływane z {@code PhysicsSystem} z ustalonym krokiem czasowym.
+     *
+     * @param body     ciało Box2D samochodu
+     * @param car      parametry tuningu auta
+     * @param input    wejście gracza (gaz, hamulec, skręt)
+     * @param physics  komponent fizyki z wymiarami nadwozia
+     */
     public static void simulatePhysicsStep(Body body, CarComponent car, InputComponent input,
                                             PhysicsComponent physics) {
         float forceScale = car.physicsForceScale;
@@ -148,9 +166,7 @@ public class MovementSystem extends IteratingSystem {
         car.rearGripPercent = PacejkaTireModel.gripUsagePercent(fyRear, car.rearTireRuntime.peakForceScaledN);
 
         float fxRear = computeLongitudinalForce(car, input.throttle, forwardSpeed, speedAbs, speedMult) * forceScale;
-        // Traction control: cut drive when the rear is overslipping. Fires when going straight
-        // (anti wheel-spin off the line) OR whenever surface mu is below road (e.g. on grass)
-        // so the back doesn't fish-tail just because the player taps gas off-road.
+        // Kontrola trakcji: ogranicza napęd przy nadmiernym poślizgu tylnej osi (prosto lub na trawie).
         boolean rearOverslipping = Math.abs(alphaRear) > car.rearPeakSlipAngle * 1.35f;
         boolean lowMuSurface = car.surfaceMu < (car.surfaceMuRoad - 0.15f);
         if (input.throttle > 0f && rearOverslipping && (straightMode || lowMuSurface)) {
@@ -169,7 +185,7 @@ public class MovementSystem extends IteratingSystem {
         }
 
         float latDamp = straightMode ? car.stabilityLateralDamping : car.turningLateralDamping;
-        // On throttle in a corner, lateral damping scrubs total speed — keep only light cleanup.
+        // W zakręcie z gazem — lekkie tłumienie boczne, żeby nie zabijać prędkości w łuku.
         if (isTurning && input.throttle > 0.12f) {
             latDamp *= 0.35f;
         }
@@ -185,8 +201,7 @@ public class MovementSystem extends IteratingSystem {
     }
 
     /**
-     * Standard bicycle-model slip at an axle (rad).
-     * alpha = atan2(v_lat + L*omega, v_long) in body frame; L is axle distance from CG (+front, -rear).
+     * Przenosi obciążenie między osiami przy skręcie — symuluje przesunięcie masy na przód.
      */
     private static void applyTurnLoadTransfer(float[] frontRearLoad, float steerInput, CarComponent car) {
         if (Math.abs(steerInput) < 0.01f) return;
@@ -195,15 +210,17 @@ public class MovementSystem extends IteratingSystem {
         frontRearLoad[1] = Math.max(frontRearLoad[1] - transfer, frontRearLoad[1] * 0.5f);
     }
 
+    /**
+     * Oblicza kąt poślizgu bocznego na osi w modelu rowerowym (w radianach).
+     */
     static float computeBicycleSlipAngle(float vLong, float vLat, float omega, float axleOffset,
                                          float steerRad, CarComponent car) {
-        // Rigid-body kinematics: v_axle = v_CG + omega x r.
-        // For r = (0, axleOffset) in body frame, v_axle_x = v_CG_x - omega * axleOffset.
+        // Kinetyka sztywnego nadwozia: prędkość osi = prędkość CG + omega × r.
         float vLongWheel = vLong;
         float vLatWheel = vLat - omega * axleOffset;
 
         if (steerRad != 0f) {
-            // Express body-frame velocity in wheel frame rotated CCW by +steerRad: apply R(-steerRad).
+            // Przekształcenie prędkości do układu obróconego kołem o kąt skrętu.
             float cos = MathUtils.cos(steerRad);
             float sin = MathUtils.sin(steerRad);
             float vLw = vLongWheel * cos - vLatWheel * sin;
@@ -222,9 +239,7 @@ public class MovementSystem extends IteratingSystem {
             denom = car.minLongitudinalSpeedForSlip;
         }
 
-        // Use a positive longitudinal magnitude so straight reverse reads ~0 slip
-        // (not ~180 degrees). This keeps forward driving identical while
-        // preventing false skidmarks/lateral force when backing up.
+        // Dodatnia prędkość wzdłużna — cofanie nie generuje fałszywego poślizgu ~180°.
         float alpha = MathUtils.atan2(vLatWheel, denom);
 
         float fade = MathUtils.clamp(chassisSpeed / Math.max(car.lowSpeedGripFadeSpeed, 0.1f), 0f, 1f);
@@ -237,7 +252,7 @@ public class MovementSystem extends IteratingSystem {
         return speedGrip * chassisGrip;
     }
 
-    /** Light yaw torque so keyboard steering works at low speed (Pacejka alone cannot turn in place). */
+    /** Lekki moment yaw — Pacejka sama nie skręca na miejscu przy niskiej prędkości. */
     private static void applySteeringYawAssist(Body body, CarComponent car, float steeringInput,
                                                float forwardSpeed, float speedAbs, float speedMult,
                                                float forceScale) {
@@ -258,18 +273,14 @@ public class MovementSystem extends IteratingSystem {
         float omegaFactor = MathUtils.clamp((absOmega - car.spinDampingOmegaStart * 0.4f)
                 / Math.max(car.spinDampingOmegaStart, 0.1f), 0f, 1f);
         float speedFactor = MathUtils.clamp(chassisSpeed / Math.max(car.pacejkaChassisSpeedRef, 0.1f), 0.3f, 1f);
-        // Lighter damping while turning so the player's yaw input survives; full damping is reserved
-        // for runaway spin when the player is not steering.
+        // Słabsze tłumienie w skręcie; pełne tylko przy niekontrolowanym spinie bez sterowania.
         float damp = car.spinAngularDamping * (isTurning ? 0.6f : 1f);
 
         body.applyTorque(-omega * damp * omegaFactor * speedFactor * forceScale, true);
     }
 
     /**
-     * Simcade recovery assist: torque pulls chassis heading toward velocity heading whenever the
-     * driver is coasting straight, easing off throttle, or actively counter-steering.
-     * Counter-steer also gets a yaw-rate damper, so a correct kontra both rotates the wheel fast
-     * (see updateSteering) and bleeds off the remaining spin.
+     * Asysta wyrównania simcade — ciągnie nadwozie w kierunku wektora prędkości przy kontrze czy puszczeniu gazu.
      */
     private static void applyAlignmentAssist(Body body, CarComponent car, InputComponent input,
                                               float forwardSpeed, float lateralSpeed, float omega,
@@ -279,8 +290,7 @@ public class MovementSystem extends IteratingSystem {
         boolean noSteer = Math.abs(input.steering) < 0.01f;
         boolean counterSteer = Math.abs(forwardSpeed) > 0.5f && isCounterSteering(input.steering, omega, car);
 
-        // Active steering (except counter-steer recovery) — don't pull heading toward velocity;
-        // that scrubs corner speed and feels like the car hits an invisible brake in turns.
+        // Aktywny skręt (poza kontrą) — nie wyrównuj kursu, bo zabija prędkość w łuku.
         if (!noSteer && !counterSteer) return;
 
         float beta = MathUtils.atan2(lateralSpeed, Math.max(Math.abs(forwardSpeed), 1.5f));
@@ -384,7 +394,7 @@ public class MovementSystem extends IteratingSystem {
 
     private void updateSteering(CarComponent car, InputComponent input, float forwardSpeed,
                                  float speedAbs, float speedMult, float omega, float deltaTime) {
-        // Snap-to-zero when essentially stopped so we don't carry residual lock into a direction change.
+        // Zeruj kierownicę przy praktycznym postoju — brak resztkowego skrętu.
         if (speedAbs < MIN_SPEED_FOR_STEER * 0.3f && Math.abs(input.steering) < 0.01f) {
             car.currentSteeringAngle = 0f;
             return;
@@ -402,9 +412,7 @@ public class MovementSystem extends IteratingSystem {
         boolean holdingSteer = Math.abs(input.steering) > 0.01f;
         float rate = holdingSteer ? car.steeringSpeed : car.steeringReturnSpeed;
 
-        // Counter-steer assist: when going forward AND the player flicks steer OPPOSITE to the
-        // current yaw direction (and the car is actually spinning), the wheel snaps over fast.
-        // This is the keyboard counterpart of a quick wrist flick on a wheel.
+        // Asysta kontry — szybkie przełożenie kierownicy przeciw kierunkowi obrotu nadwozia.
         if (holdingSteer && Math.abs(forwardSpeed) > 0.5f && isCounterSteering(input.steering, omega, car)) {
             rate *= car.counterSteerSpeedMultiplier;
         }

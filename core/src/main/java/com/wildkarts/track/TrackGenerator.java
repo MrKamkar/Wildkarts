@@ -10,50 +10,57 @@ import com.badlogic.gdx.utils.Json;
 import com.badlogic.gdx.utils.JsonWriter;
 
 /**
- * Track generator using manual control points and CatmullRomSpline.
+ * Generator toru na podstawie ręcznych punktów kontrolnych i {@link CatmullRomSpline}.
  *
- * Workflow:
- * 1. Add control points via addPoint() (editor clicks)
- * 2. When >= 4 points exist, a closed CatmullRomSpline is built
- * 3. The spline is rasterized onto a 2D tile grid (ROAD vs GRASS)
- * 4. Grid can be queried at runtime for terrain type under any world position
+ * <p>Przebieg pracy:</p>
+ * <ol>
+ *   <li>Dodawanie punktów przez {@link #addPoint(float, float)} (kliknięcia w edytorze)</li>
+ *   <li>Przy ≥4 punktach budowana jest zamknięta spline Catmull-Rom</li>
+ *   <li>Spline rasteryzowana jest na siatkę 2D (DROGA vs TRAWA)</li>
+ *   <li>Siatkę można odpytywać w runtime o typ terenu pod dowolną pozycją</li>
+ * </ol>
  *
- * Maps are saved/loaded as JSON arrays of control point coordinates.
+ * <p>Mapy zapisywane/ładowane są jako tablice JSON współrzędnych punktów kontrolnych.</p>
  */
 public class TrackGenerator {
 
+    /** Kafelek trawy (poza drogą). */
     public static final int TILE_GRASS = 0;
+
+    /** Kafelek drogi. */
     public static final int TILE_ROAD = 1;
 
-    /** Grid dimensions in tiles. */
+    /** Szerokość siatki w kafelkach. */
     private int gridWidth = 200;
+
+    /** Wysokość siatki w kafelkach. */
     private int gridHeight = 200;
 
-    /** Size of one tile in Box2D meters. */
+    /** Rozmiar jednego kafelka w metrach Box2D. */
     public static final float TILE_SIZE = 0.5f;
 
-    /** Half-width of the road in meters (total road width = 2 * this). */
+    /** Połowa szerokości jezdni w metrach (pełna szerokość = 2 × ta wartość). */
     private float trackHalfWidth = 6f;
 
-    /** Extra lateral tolerance beyond road half-width for checkpoint gates (meters). */
+    /** Dodatkowa tolerancja boczna bramki checkpointu poza połową szerokości drogi (m). */
     public static final float GATE_LATERAL_MARGIN = 0.75f;
 
-    /** Depth along the road direction within which a car counts as crossing a gate (meters). */
+    /** Głębokość wzdłuż drogi, w której auto uznawane jest za minięcie bramki (m). */
     public static final float GATE_DEPTH_ALONG_ROAD = 3.0f;
 
-    /** Spline sampling step — smaller = more accurate rasterization. */
+    /** Krok próbkowania spline — mniejszy = dokładniejsza rasteryzacja. */
     private static final float SPLINE_STEP = 0.001f;
 
-    /** Width of curb strip in meters. */
+    /** Szerokość pasa krawężnika w metrach. */
     private static final float CURB_WIDTH = 1.0f;
 
-    /** Curvature angle threshold (degrees) — curbs placed when exceeded. */
+    /** Próg kąta zakrętu (stopnie) — krawężniki przy przekroczeniu. */
     private static final float CURB_ANGLE_THRESHOLD = 15f;
 
-    /** Spline step for curb detection (coarser than road rasterization). */
+    /** Krok spline do wykrywania krawężników (rzadszy niż rasteryzacja drogi). */
     private static final float CURB_SPLINE_STEP = 0.003f;
 
-    // Grid origin: bottom-left corner in world coordinates
+    /** Początek siatki: lewy dolny róg we współrzędnych świata. */
     private float originX;
     private float originY;
 
@@ -61,6 +68,7 @@ public class TrackGenerator {
     private final Array<Vector2> manualPoints = new Array<>();
     private CatmullRomSpline<Vector2> spline;
 
+    /** Pojedynczy segment krawężnika (pozycja, obrót, kolor). */
     public static class CurbSegment {
         public float x, y;
         public float rotationRad;
@@ -69,10 +77,17 @@ public class TrackGenerator {
 
     private final Array<CurbSegment> curbs = new Array<>();
 
+    /** Tworzy generator z domyślną siatką 200×200. */
     public TrackGenerator() {
         setGridSize(200, 200);
     }
 
+    /**
+     * Zmienia rozmiar siatki kafelków i przebudowuje tor, jeśli to możliwe.
+     *
+     * @param width  nowa szerokość siatki
+     * @param height nowa wysokość siatki
+     */
     public void setGridSize(int width, int height) {
         this.gridWidth = width;
         this.gridHeight = height;
@@ -86,10 +101,11 @@ public class TrackGenerator {
         }
     }
 
-    // ─── Point Management ──────────────────────────────────────────────
-
     /**
-     * Adds a control point. When 4+ points exist, rebuilds spline and grid.
+     * Dodaje punkt kontrolny. Przy ≥4 punktach przebudowuje spline i siatkę.
+     *
+     * @param x współrzędna X w metrach
+     * @param y współrzędna Y w metrach
      */
     public void addPoint(float x, float y) {
         manualPoints.add(new Vector2(x, y));
@@ -99,7 +115,7 @@ public class TrackGenerator {
     }
 
     /**
-     * Removes the last added control point and rebuilds if enough remain.
+     * Usuwa ostatni punkt kontrolny i przebudowuje tor, jeśli zostało wystarczająco punktów.
      */
     public void removeLastPoint() {
         if (manualPoints.size > 0) {
@@ -114,35 +130,31 @@ public class TrackGenerator {
         }
     }
 
-    // ─── Spline & Grid Rebuild ─────────────────────────────────────────
-
+    /** Przebudowuje zamkniętą spline i rasteryzuje drogę oraz krawężniki. */
     private void rebuildSplineAndGrid() {
         clearGrid();
 
-        // Build closed CatmullRom spline from control points
         Vector2[] points = manualPoints.toArray(Vector2.class);
         spline = new CatmullRomSpline<>(points, true);
 
-        // Walk along the spline, marking nearby tiles as ROAD
         Vector2 pos = new Vector2();
         for (float t = 0; t <= 1f; t += SPLINE_STEP) {
             spline.valueAt(pos, t);
             markTilesAround(pos.x, pos.y);
         }
 
-        // Second pass: detect sharp turns and place curbs on road edges
         generateCurbs();
     }
 
     /**
-     * Walks the spline evenly by distance, evaluates curvature, and generates
-     * independent edge paths. It then places uniform curbs exactly on the edges.
+     * Próbkuje spline co stały dystans, wykrywa ostre zakręty
+     * i rozkłada krawężniki wzdłuż krawędzi jezdni.
      */
     private void generateCurbs() {
         curbs.clear();
         if (spline == null) return;
 
-        float stepSize = 0.5f; // Sample the center spline every 0.5 meters
+        float stepSize = 0.5f;
         float distanceAccumulator = 0f;
 
         Vector2 currPos = new Vector2();
@@ -153,7 +165,6 @@ public class TrackGenerator {
         Array<Vector2> pathPoints = new Array<>();
         Array<Vector2> pathTangents = new Array<>();
 
-        // 1. Sample center spline evenly by distance
         for (float t = 0.001f; t <= 1f; t += 0.001f) {
             spline.valueAt(currPos, t);
             float dist = prevPos.dst(currPos);
@@ -175,10 +186,9 @@ public class TrackGenerator {
 
         if (pathPoints.size == 0) return;
 
-        // 2. Identify sharp curves with a lookahead window
         boolean[] rawCurb = new boolean[pathPoints.size];
-        int lookahead = 6; // Compare with tangent 3.0m ahead (stepSize=0.5 * 6)
-        float thresholdAngle = 5.0f; // Must bend at least 5 degrees over 3 meters
+        int lookahead = 6;
+        float thresholdAngle = 5.0f;
         
         for (int i = 0; i < pathPoints.size; i++) {
             int nextIdx = (i + lookahead) % pathPoints.size;
@@ -193,9 +203,8 @@ public class TrackGenerator {
             }
         }
 
-        // Dilate curb zones to bridge small gaps and extend them slightly before/after turns
         boolean[] hasCurb = new boolean[pathPoints.size];
-        int dilation = 5; // Expand by 2.5 meters in both directions
+        int dilation = 5;
         for (int i = 0; i < pathPoints.size; i++) {
             if (rawCurb[i]) {
                 for (int j = -dilation; j <= dilation; j++) {
@@ -205,14 +214,13 @@ public class TrackGenerator {
             }
         }
 
-        // 3. Generate independent Left and Right Edge paths
         Array<Vector2> leftEdge = new Array<>();
         Array<Vector2> rightEdge = new Array<>();
         Array<Boolean> leftHasCurb = new Array<>();
         Array<Boolean> rightHasCurb = new Array<>();
 
-        float curbDepth = 0.6f; // Depth of curb away from road edge
-        float offset = trackHalfWidth + curbDepth / 2f; // Offset to center of the curb
+        float curbDepth = 0.6f;
+        float offset = trackHalfWidth + curbDepth / 2f;
 
         for (int i = 0; i < pathPoints.size; i++) {
             Vector2 p = pathPoints.get(i);
@@ -225,15 +233,15 @@ public class TrackGenerator {
             rightHasCurb.add(hasCurb[i]);
         }
 
-        // 4. Generate evenly spaced curbs along each edge path independently
         generateEdgeCurbs(leftEdge, leftHasCurb, pathPoints, pathTangents, curbs);
         generateEdgeCurbs(rightEdge, rightHasCurb, pathPoints, pathTangents, curbs);
     }
 
-    private void generateEdgeCurbs(Array<Vector2> edgePoints, Array<Boolean> edgeHasCurb, 
+    /** Rozkłada segmenty krawężników wzdłuż jednej krawędzi jezdni. */
+    private void generateEdgeCurbs(Array<Vector2> edgePoints, Array<Boolean> edgeHasCurb,
                                    Array<Vector2> centerPoints, Array<Vector2> centerTangents, 
                                    Array<CurbSegment> curbsList) {
-        float curbLength = 1.0f; // Fixed length of curb segment
+        float curbLength = 1.0f;
         float distAcc = 0f;
         boolean isRed = true;
         int colorCounter = 0;
@@ -248,37 +256,30 @@ public class TrackGenerator {
             Vector2 dir = new Vector2(currP).sub(prevP).nor();
             Vector2 centerDir = centerTangents.get(i);
 
-            // 1. Prevent tangled loops: If the edge path goes backward relative to the road, skip it.
-            if (dir.dot(centerDir) < -0.2f) {
+            if (dir.dot(centerDir) < -0.2f)
                 continue;
-            }
 
             float walkedOnSegment = 0f;
             while (walkedOnSegment + (curbLength - distAcc) <= segmentLen) {
                 float move = curbLength - distAcc;
                 walkedOnSegment += move;
-                distAcc = 0f; // We completed a curb length
+                distAcc = 0f;
                 
                 Vector2 pos = new Vector2(prevP).add(new Vector2(dir).scl(walkedOnSegment));
                 
-                // 2. Distance check: Ensure the curb doesn't intersect the asphalt.
-                // We check nearby center points. If any is closer than the track width, the curb is biting into the road.
                 boolean valid = true;
-                int checkRange = 15; // Local window to check for intersections
+                int checkRange = 15;
                 for (int j = -checkRange; j <= checkRange; j++) {
                     int pIdx = (i + j + centerPoints.size) % centerPoints.size;
                     Vector2 cp = centerPoints.get(pIdx);
-                    // 0.1f epsilon for floating point inaccuracies
                     if (pos.dst(cp) < trackHalfWidth - 0.1f) {
                         valid = false;
                         break;
                     }
                 }
                 
-                // If the end of the curb falls within a curb zone and is valid, place it
                 if (valid && edgeHasCurb.get(i)) {
                     CurbSegment seg = new CurbSegment();
-                    // Move position to the center of this 1.0m segment
                     seg.x = pos.x - dir.x * (curbLength / 2f);
                     seg.y = pos.y - dir.y * (curbLength / 2f);
                     seg.rotationRad = dir.angleRad();
@@ -286,9 +287,8 @@ public class TrackGenerator {
                     curbsList.add(seg);
                     
                     colorCounter++;
-                    if (colorCounter % 1 == 0) { // Toggle every 1 segment
+                    if (colorCounter % 1 == 0)
                         isRed = !isRed;
-                    }
                 } else {
                     colorCounter = 0;
                 }
@@ -297,6 +297,7 @@ public class TrackGenerator {
         }
     }
 
+    /** Ustawia wszystkie kafelki siatki na {@link #TILE_GRASS}. */
     private void clearGrid() {
         for (int col = 0; col < gridWidth; col++) {
             for (int row = 0; row < gridHeight; row++) {
@@ -306,7 +307,7 @@ public class TrackGenerator {
     }
 
     /**
-     * Marks all tiles within TRACK_HALF_WIDTH of the given world position as ROAD.
+     * Oznacza kafelki w promieniu {@code trackHalfWidth} od podanej pozycji jako {@link #TILE_ROAD}.
      */
     private void markTilesAround(float worldX, float worldY) {
         int centerCol = worldToGridCol(worldX);
@@ -330,11 +331,13 @@ public class TrackGenerator {
         }
     }
 
-    // ─── World ↔ Grid Coordinate Conversion ────────────────────────────
-
     /**
-     * Returns the tile type (TILE_ROAD or TILE_GRASS) at the given world position.
-     * Positions outside the grid are treated as GRASS.
+     * Zwraca typ kafelka ({@link #TILE_ROAD} lub {@link #TILE_GRASS}) w podanej pozycji świata.
+     * Pozycje poza siatką traktowane są jako trawa.
+     *
+     * @param worldX pozycja X w metrach
+     * @param worldY pozycja Y w metrach
+     * @return {@link #TILE_ROAD} lub {@link #TILE_GRASS}
      */
     public int getTileAt(float worldX, float worldY) {
         int col = worldToGridCol(worldX);
@@ -345,26 +348,30 @@ public class TrackGenerator {
         return grid[col][row];
     }
 
+    /** Konwertuje współrzędną X świata na kolumnę siatki. */
     private int worldToGridCol(float worldX) {
         return (int) ((worldX - originX) / TILE_SIZE);
     }
 
+    /** Konwertuje współrzędną Y świata na wiersz siatki. */
     private int worldToGridRow(float worldY) {
         return (int) ((worldY - originY) / TILE_SIZE);
     }
 
+    /** Zwraca środek kafelka (X) dla danej kolumny. */
     private float gridToWorldX(int col) {
         return originX + col * TILE_SIZE + TILE_SIZE / 2f;
     }
 
+    /** Zwraca środek kafelka (Y) dla danego wiersza. */
     private float gridToWorldY(int row) {
         return originY + row * TILE_SIZE + TILE_SIZE / 2f;
     }
 
-    // ─── Save / Load (LibGDX Json) ─────────────────────────────────────
-
     /**
-     * Saves control points to a JSON file in the local storage directory.
+     * Zapisuje punkty kontrolne do pliku JSON w katalogu lokalnym.
+     *
+     * @param fileName nazwa pliku (ścieżka względem {@code Gdx.files.local})
      */
     public void saveMap(String fileName) {
         Json json = new Json();
@@ -375,9 +382,10 @@ public class TrackGenerator {
     }
 
     /**
-     * Loads control points from a JSON file and rebuilds the track.
+     * Ładuje punkty kontrolne z pliku JSON i przebudowuje tor.
      *
-     * @return true if load succeeded, false if file not found
+     * @param fileName nazwa pliku
+     * @return {@code true} gdy wczytanie się powiodło, {@code false} gdy brak pliku
      */
     @SuppressWarnings("unchecked")
     public boolean loadMap(String fileName) {
@@ -401,10 +409,10 @@ public class TrackGenerator {
         return true;
     }
 
-    // ─── Start Position ────────────────────────────────────────────────
-
     /**
-     * Returns the spawn position (first control point, or origin if none).
+     * Zwraca pozycję startową (pierwszy punkt kontrolny lub (0,0) gdy brak punktów).
+     *
+     * @return nowy {@link Vector2} z pozycją spawnu
      */
     public Vector2 getStartPosition() {
         if (manualPoints.size > 0) {
@@ -414,7 +422,9 @@ public class TrackGenerator {
     }
 
     /**
-     * Returns the spawn angle (direction toward second point, or 0).
+     * Zwraca kąt startowy (kierunek do drugiego punktu lub 0).
+     *
+     * @return kąt w radianach
      */
     public float getStartAngle() {
         if (manualPoints.size >= 2) {
@@ -424,22 +434,44 @@ public class TrackGenerator {
         return 0;
     }
 
-    // ─── Getters ───────────────────────────────────────────────────────
-
+    /** @return siatka kafelków (typy terenu) */
     public int[][] getGrid() { return grid; }
+
+    /** @return szerokość siatki w kafelkach */
     public int getGridWidth() { return gridWidth; }
+
+    /** @return wysokość siatki w kafelkach */
     public int getGridHeight() { return gridHeight; }
+
+    /** @return rozmiar kafelka w metrach */
     public float getTileSize() { return TILE_SIZE; }
+
+    /** @return współrzędna X początku siatki */
     public float getOriginX() { return originX; }
+
+    /** @return współrzędna Y początku siatki */
     public float getOriginY() { return originY; }
+
+    /** @return spline Catmull-Rom toru lub {@code null} gdy za mało punktów */
     public CatmullRomSpline<Vector2> getSpline() { return spline; }
+
+    /** @return lista punktów kontrolnych */
     public Array<Vector2> getManualPoints() { return manualPoints; }
+
+    /** @return połowa szerokości jezdni w metrach */
     public float getTrackHalfWidth() { return trackHalfWidth; }
+
+    /** @return wygenerowane segmenty krawężników */
     public Array<CurbSegment> getCurbs() { return curbs; }
 
     /**
-     * Returns true when {@code (x, y)} is within the checkpoint gate at the given
-     * control point — a strip perpendicular to the track spanning the full road width.
+     * Sprawdza, czy punkt {@code (x, y)} leży w bramce checkpointu przy danym punkcie kontrolnym
+     * (pasek prostopadły do drogi na pełną szerokość jezdni).
+     *
+     * @param pointIndex indeks punktu kontrolnego
+     * @param x          pozycja X auta
+     * @param y          pozycja Y auta
+     * @return {@code true} gdy auto jest w strefie bramki
      */
     public boolean isWithinCheckpointGate(int pointIndex, float x, float y) {
         int n = manualPoints.size;
@@ -456,7 +488,6 @@ public class TrackGenerator {
         tx /= tLen;
         ty /= tLen;
 
-        // Gate normal (perpendicular to road direction through this point)
         float nx = -ty;
         float ny = tx;
 
@@ -469,7 +500,13 @@ public class TrackGenerator {
                 && Math.abs(along) <= GATE_DEPTH_ALONG_ROAD;
     }
 
-    /** Gate center and unit normal for rendering or debug (normal points across track). */
+    /**
+     * Zwraca środek bramki checkpointu i wektor normalny (prostopadły do drogi).
+     *
+     * @param pointIndex indeks punktu kontrolnego
+     * @param centerOut  wyjście: środek bramki
+     * @param normalOut  wyjście: znormalizowany wektor normalny
+     */
     public void getCheckpointGateFrame(int pointIndex, Vector2 centerOut, Vector2 normalOut) {
         int n = manualPoints.size;
         if (n < 3 || pointIndex < 0 || pointIndex >= n) return;
@@ -489,12 +526,20 @@ public class TrackGenerator {
         normalOut.set(-ty, tx);
     }
 
-    // ─── Data Sync ─────────────────────────────────────────────────────
-
+    /**
+     * Eksportuje dane toru do synchronizacji sieciowej.
+     *
+     * @return pakiet {@link TrackData}
+     */
     public TrackData exportData() {
         return new TrackData(new Array<>(manualPoints), gridWidth, gridHeight, trackHalfWidth);
     }
 
+    /**
+     * Importuje dane toru z pakietu sieciowego i przebudowuje siatkę.
+     *
+     * @param data dane toru z serwera
+     */
     public void importData(TrackData data) {
         this.gridWidth = data.gridWidth;
         this.gridHeight = data.gridHeight;

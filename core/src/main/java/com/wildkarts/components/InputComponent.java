@@ -3,20 +3,20 @@ package com.wildkarts.components;
 import com.badlogic.ashley.core.Component;
 
 /**
- * Stores normalized player input values.
- * Decoupled from physics — key design for multiplayer readiness.
- * 
- * In single-player: populated by InputSystem from keyboard.
- * In multiplayer: populated by NetworkInputSystem from server packets.
+ * Przechowuje znormalizowane wartości wejścia gracza.
+ * Oddzielone od fizyki — kluczowy projekt pod tryb wieloosobowy.
+ *
+ * <p>Tryb solo: wypełniane przez {@link com.wildkarts.systems.InputSystem} z klawiatury.
+ * Multiplayer: wypełniane z pakietów sieciowych.</p>
  */
 public class InputComponent implements Component {
 
-    /** Forward/backward input. Range: -1 (full reverse) to 1 (full throttle). */
+    /** Gaz / hamulec. Zakres: -1 (pełny tył) do 1 (pełny przód). */
     public float throttle = 0f;
 
-    /** Left/right steering input. Range: -1 (full left) to 1 (full right). */
+    /** Kierownica. Zakres: -1 (lewo) do 1 (prawo). */
     public float steering = 0f;
 
-    /** Handbrake / drift trigger. Reduces lateral friction when active. */
+    /** Ręczny / drift — zmniejsza boczną przyczepność gdy aktywny. */
     public boolean braking = false;
 }

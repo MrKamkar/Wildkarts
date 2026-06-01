@@ -5,8 +5,8 @@ import com.badlogic.gdx.math.Vector2;
 import com.wildkarts.systems.PacejkaTireModel;
 
 /**
- * Simcade car tuning — Pacejka lateral tire model with RWD longitudinal forces.
- * All balance knobs are public fields for easy editor tweaking.
+ * Parametry tuningu auta simcade — boczny model Pacejki z napędem na tylną oś (RWD).
+ * Wszystkie pola publiczne umożliwiają szybką edycję w inspektorze / debuggerze.
  */
 public class CarComponent implements Component {
 

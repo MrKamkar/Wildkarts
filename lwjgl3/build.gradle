@@ -32,7 +32,109 @@ jar {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
 
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+
     manifest {
-        attributes 'Main-Class': application.mainClass
+        attributes 'Main-Class': application.mainClass.get()
+    }
+}
+
+// jpackage: WildKarts.exe + bundled JRE (no JDK required for players)
+
+def appIconIco = file('assets/textures/icon.ico')
+
+def resolveJpackageExe = {
+    def candidates = [
+        'C:/Program Files/Java/jdk-25.0.2',
+        'C:/Program Files/Java/jdk-21',
+        System.getProperty('java.home'),
+    ]
+    for (def home : candidates) {
+        def exe = new File(home as String, 'bin/jpackage.exe')
+        if (exe.exists()) {
+            return exe
+        }
+    }
+    throw new GradleException(
+        'jpackage.exe not found. Install JDK 17+ with jpackage (e.g. JDK 21 or 25).')
+}
+
+tasks.register('jpackageWin') {
+    group = 'distribution'
+    description = 'Builds build/jpackage/WildKarts/ with WildKarts.exe and bundled JRE (Windows).'
+    dependsOn jar
+
+    onlyIf {
+        org.gradle.internal.os.OperatingSystem.current().isWindows()
+    }
+
+    doLast {
+        def inputDir = layout.buildDirectory.dir('jpackage-input').get().asFile
+        def destDir = layout.buildDirectory.dir('jpackage').get().asFile
+        def appDir = new File(destDir, 'WildKarts')
+        def mainJar = jar.archiveFile.get().asFile
+
+        project.delete inputDir, appDir
+        inputDir.mkdirs()
+
+        copy {
+            from mainJar
+            into inputDir
+        }
+
+        def jpackageExe = resolveJpackageExe()
+        println "jpackage: ${jpackageExe.absolutePath}"
+
+        if (!appIconIco.exists()) {
+            throw new GradleException('Missing assets/textures/icon.ico')
+        }
+
+        def args = [
+            jpackageExe.absolutePath,
+            '--input', inputDir.absolutePath,
+            '--name', 'WildKarts',
+            '--main-jar', mainJar.name,
+            '--main-class', application.mainClass.get(),
+            '--type', 'app-image',
+            '--dest', destDir.absolutePath,
+            '--app-version', version.toString(),
+            '--description', 'WildKarts - arcade racing',
+            '--vendor', 'WildKarts',
+            '--java-options', '-Xmx2G',
+            '--icon', appIconIco.absolutePath,
+            '--verbose',
+        ]
+
+        exec {
+            commandLine args
+        }
+
+        def exe = new File(appDir, 'WildKarts.exe')
+        exec {
+            commandLine 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                    '-File', file('scripts/verify-exe-icon.ps1').absolutePath,
+                    '-ExePath', exe.absolutePath
+        }
+
+        println ''
+        println 'Done: ' + exe.absolutePath
+        println 'Share the WildKarts/ folder (or run: gradlew :lwjgl3:packageWinZip)'
+    }
+}
+
+tasks.register('packageWinZip', Zip) {
+    group = 'distribution'
+    description = 'Zips the jpackage output for distribution (Windows).'
+    dependsOn jpackageWin
+
+    archiveBaseName.set('WildKarts-windows')
+    destinationDirectory.set(layout.buildDirectory.dir('distributions'))
+
+    from(layout.buildDirectory.dir('jpackage/WildKarts')) {
+        into 'WildKarts'
+    }
+
+    doLast {
+        println 'ZIP ready: ' + archiveFile.get().asFile.absolutePath
     }
 }

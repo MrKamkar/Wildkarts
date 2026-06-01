@@ -5,9 +5,9 @@ import com.badlogic.ashley.core.Entity;
 import com.badlogic.ashley.core.Family;
 import com.badlogic.ashley.systems.IteratingSystem;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
@@ -18,11 +18,11 @@ import com.wildkarts.components.PhysicsComponent;
 import com.wildkarts.util.SpriteAnchorUtil;
 
 /**
- * Renders car entities as sprites (SpriteBatch) with optional Box2D debug overlay.
+ * Renderuje encje aut jako sprite'y ({@link SpriteBatch}) z opcjonalną nakładką debug Box2D.
  *
- * <p>Three sprites: {@code car_straight}, {@code car_turn_left}, {@code car_turn_right}
- * (separate PNG files — no mirroring). Visual centers are aligned to the straight
- * reference so swapping artwork does not shift the car on screen.</p>
+ * <p>Trzy sprite'y: {@code car_straight}, {@code car_turn_left}, {@code car_turn_right}
+ * (osobne pliki PNG — bez lustrzanego odbicia). Środki wizualne wyrównane do referencji
+ * prostej, aby zamiana grafiki nie przesuwała auta na ekranie.</p>
  */
 public class RenderSystem extends IteratingSystem {
 
@@ -53,6 +53,19 @@ public class RenderSystem extends IteratingSystem {
     private final ComponentMapper<CarComponent> carMapper =
             ComponentMapper.getFor(CarComponent.class);
 
+    /**
+     * Tworzy system renderowania aut z trzema wariantami sprite'a i kotwicami wyrównania.
+     *
+     * @param camera          kamera świata
+     * @param world           świat Box2D (do debug draw)
+     * @param physicsSystem   system fizyki (do interpolacji alpha)
+     * @param carStraight     tekstura jazdy prosto
+     * @param straightAnchor  kotwica sprite'a prostej
+     * @param carTurnLeft     tekstura skrętu w lewo
+     * @param turnLeftAnchor  kotwica skrętu w lewo
+     * @param carTurnRight    tekstura skrętu w prawo
+     * @param turnRightAnchor kotwica skrętu w prawo
+     */
     public RenderSystem(OrthographicCamera camera, World world, PhysicsSystem physicsSystem,
                         Texture carStraight, SpriteAnchorUtil.Anchor straightAnchor,
                         Texture carTurnLeft, SpriteAnchorUtil.Anchor turnLeftAnchor,
@@ -73,6 +86,7 @@ public class RenderSystem extends IteratingSystem {
         this.carTurnRightRegion = new TextureRegion(carTurnRight);
     }
 
+    /** Rysuje wszystkie auta, potem opcjonalnie debug Box2D. */
     @Override
     public void update(float deltaTime) {
         batch.setProjectionMatrix(camera.combined);
@@ -80,11 +94,11 @@ public class RenderSystem extends IteratingSystem {
         super.update(deltaTime);
         batch.end();
 
-        if (debugDraw) {
+        if (debugDraw)
             debugRenderer.render(world, camera.combined);
-        }
     }
 
+    /** Rysuje jedno auto z interpolacją pozycji i wyborem sprite'a skrętu. */
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         PhysicsComponent physics = physicsMapper.get(entity);
@@ -133,20 +147,23 @@ public class RenderSystem extends IteratingSystem {
         batch.draw(region, drawX, drawY, originX, originY, spriteW, spriteH, 1f, 1f, rotation);
     }
 
+    /**
+     * Aktualizuje stan histerezy sprite'a skrętu (prosto / lewo / prawo).
+     *
+     * @return -1 prawo, 0 prosto, 1 lewo
+     */
     private static int updateSteerSpriteState(CarComponent car) {
         if (car == null) return 0;
 
         float steerAngle = car.currentSteeringAngle;
         if (car.steerSpriteState == 0) {
-            if (steerAngle <= -TURN_SPRITE_ANGLE_ON) {
+            if (steerAngle <= -TURN_SPRITE_ANGLE_ON)
                 car.steerSpriteState = -1;
-            } else if (steerAngle >= TURN_SPRITE_ANGLE_ON) {
+            else if (steerAngle >= TURN_SPRITE_ANGLE_ON)
                 car.steerSpriteState = 1;
-            }
         } else if (car.steerSpriteState < 0) {
-            if (steerAngle > -TURN_SPRITE_ANGLE_OFF) {
+            if (steerAngle > -TURN_SPRITE_ANGLE_OFF)
                 car.steerSpriteState = 0;
-            }
         } else if (car.steerSpriteState > 0 && steerAngle < TURN_SPRITE_ANGLE_OFF) {
             car.steerSpriteState = 0;
         }
@@ -155,8 +172,8 @@ public class RenderSystem extends IteratingSystem {
     }
 
     /**
-     * Shifts the draw position so {@code spriteAnchor} lines up with {@code referenceAnchor}
-     * at the physics body position.
+     * Przesuwa pozycję rysowania, aby {@code spriteAnchor} pokrywał się z {@code referenceAnchor}
+     * w miejscu ciała fizycznego.
      */
     private static void applyAnchorCorrection(SpriteAnchorUtil.Anchor referenceAnchor,
                                               SpriteAnchorUtil.Anchor spriteAnchor,
@@ -177,10 +194,12 @@ public class RenderSystem extends IteratingSystem {
         out.y = localX * sin + localY * cos;
     }
 
+    /** Przełącza rysowanie debug Box2D. */
     public void toggleDebugDraw() {
         debugDraw = !debugDraw;
     }
 
+    /** Zwalnia zasoby renderowania. */
     public void dispose() {
         batch.dispose();
         debugRenderer.dispose();

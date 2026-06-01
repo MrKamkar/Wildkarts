@@ -4,37 +4,37 @@ import com.badlogic.ashley.core.Component;
 import com.wildkarts.track.TrackGenerator;
 
 /**
- * Marks an entity as terrain-aware.
- * TerrainSystem reads the entity's Box2D position, looks up the tile type
- * from the TrackGenerator grid, and modifies CarComponent speed limits
- * accordingly (road = full speed, grass = heavily limited).
+ * Oznacza encję jako „świadomą terenu”.
+ * {@link com.wildkarts.systems.TerrainSystem} odczytuje pozycję Box2D, sprawdza typ kafelka
+ * w siatce {@link TrackGenerator} i modyfikuje limity prędkości w {@link CarComponent}
+ * (droga = pełna prędkość, trawa = mocno ograniczona).
  *
- * Default speed values are captured at initialization so different car types
- * can have different base speeds.
+ * <p>Domyślne wartości prędkości zapisywane są przy inicjalizacji, aby różne typy aut
+ * mogły mieć różne prędkości bazowe.</p>
  */
 public class TerrainComponent implements Component {
 
-    /** Reference to the track generator for tile lookups. */
+    /** Referencja do generatora toru do wyszukiwania kafelków. */
     public TrackGenerator trackGenerator;
 
-    /** Current tile type under this entity (updated by TerrainSystem). */
+    /** Aktualny typ kafelka pod encją (aktualizowany przez {@link com.wildkarts.systems.TerrainSystem}). */
     public int currentTile = TrackGenerator.TILE_ROAD;
 
-    /** Original max forward speed (captured from CarComponent at init). */
+    /** Oryginalna maksymalna prędkość do przodu (zapisana z {@link CarComponent} przy starcie). */
     public float defaultMaxForwardSpeed = 80f;
 
-    /** Original engine force (captured from CarComponent at init). */
+    /** Oryginalna siła silnika (zapisana z {@link CarComponent} przy starcie). */
     public float defaultEngineForce = 60f;
 
-    /** Original rolling resistance (captured from CarComponent at init). */
+    /** Oryginalny opór toczenia (zapisany z {@link CarComponent} przy starcie). */
     public float defaultRollingResistance = 0.25f;
 
-    /** Original aero drag coefficient (captured from CarComponent at init). */
+    /** Oryginalny współczynnik oporu aerodynamicznego (zapisany z {@link CarComponent} przy starcie). */
     public float defaultAeroDragCoeff = 0.005f;
 
-    /** Original Box2D linear damping (captured from CarComponent at init). */
+    /** Oryginalne tłumienie liniowe Box2D (zapisane z {@link CarComponent} przy starcie). */
     public float defaultLinearDamping = 0.1f;
 
-    /** Original Box2D angular damping (captured from CarComponent at init). */
+    /** Oryginalne tłumienie kątowe Box2D (zapisane z {@link CarComponent} przy starcie). */
     public float defaultAngularDamping = 3.0f;
 }

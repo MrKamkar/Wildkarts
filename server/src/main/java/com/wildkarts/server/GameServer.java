@@ -2,17 +2,25 @@ package com.wildkarts.server;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.utils.Json;
+import com.badlogic.gdx.utils.JsonWriter;
 import com.esotericsoftware.kryonet.Connection;
 import com.esotericsoftware.kryonet.Listener;
 import com.esotericsoftware.kryonet.Server;
+import com.wildkarts.net.AckPacket;
 import com.wildkarts.net.Network;
 import com.wildkarts.net.ReliablePacket;
 import com.wildkarts.net.UdpReliabilityManager;
-import com.wildkarts.net.AckPacket;
-import com.wildkarts.net.packets.*;
+import com.wildkarts.net.packets.JoinAccepted;
+import com.wildkarts.net.packets.JoinRequest;
+import com.wildkarts.net.packets.MapData;
+import com.wildkarts.net.packets.MapReadyPacket;
+import com.wildkarts.net.packets.PlayerDisconnectedPacket;
+import com.wildkarts.net.packets.PlayerPassedPointPacket;
+import com.wildkarts.net.packets.PlayerPositionPacket;
+import com.wildkarts.net.packets.PlayerReadyPacket;
+import com.wildkarts.net.packets.StartGamePacket;
 import com.wildkarts.track.TrackGenerator;
-import com.badlogic.gdx.utils.Json;
-import com.badlogic.gdx.utils.JsonWriter;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -21,24 +29,25 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Headless authoritative server application.
+ * Bezgraficzna aplikacja serwera autorytatywnego.
+ * Obsługuje połączenia KryoNet, dystrybucję mapy i deleguje logikę wyścigu do {@link ServerRaceManager}.
  */
 public class GameServer extends ApplicationAdapter {
 
     private Server server;
     private UdpReliabilityManager reliabilityManager;
     private final AtomicInteger playerIdGenerator = new AtomicInteger(1);
-    
-    // Tracks which connections have already joined to prevent duplicate spawns
-    private final Map<Integer, Integer> playerConnectionMap = new HashMap<>();
-    
-    private String mapJson;
-    private static final int CHUNK_SIZE = 8192; // 8KB chunks
 
-    // Authoritative race state (FSM, sector validation, leaderboard)
+    /** Mapuje ID połączenia KryoNet na przypisany identyfikator gracza. */
+    private final Map<Integer, Integer> playerConnectionMap = new HashMap<>();
+
+    private String mapJson;
+    private static final int CHUNK_SIZE = 8192;
+
     private TrackGenerator trackGenerator;
     private ServerRaceManager raceManager;
 
+    /** Uruchamia serwer KryoNet, ładuje mapę i rejestruje listener pakietów. */
     @Override
     public void create() {
         server = new Server();
@@ -60,18 +69,15 @@ public class GameServer extends ApplicationAdapter {
             public void disconnected(Connection connection) {
                 Gdx.app.log("GameServer", "Client disconnected: " + connection.getRemoteAddressTCP());
                 Integer playerId = playerConnectionMap.remove(connection.getID());
-                if (playerId != null) {
+                if (playerId != null)
                     server.sendToAllExceptTCP(connection.getID(), new PlayerDisconnectedPacket(playerId));
-                }
                 raceManager.onPlayerDisconnected(connection);
             }
 
             @Override
             public void received(Connection connection, Object object) {
-                // Always immediately ACK any received ReliablePacket
-                if (object instanceof ReliablePacket rp) {
+                if (object instanceof ReliablePacket rp)
                     connection.sendUDP(new AckPacket(rp.sequenceId));
-                }
 
                 if (object == null) return;
 
@@ -90,7 +96,6 @@ public class GameServer extends ApplicationAdapter {
                         raceManager.onPlayerMapLoaded(connection);
                     }
                     case "PlayerPositionPacket" -> {
-                        // Relay to peers AND feed the race manager so it can validate point passes.
                         PlayerPositionPacket ppp = (PlayerPositionPacket) object;
                         raceManager.onPlayerPosition(connection, ppp.x, ppp.y);
                         server.sendToAllExceptUDP(connection.getID(), object);
@@ -122,32 +127,32 @@ public class GameServer extends ApplicationAdapter {
         }
     }
 
+    /**
+     * Rejestruje nowego gracza, wysyła potwierdzenie dołączenia i fragmenty mapy.
+     * Ignoruje powtórne {@link JoinRequest} z tego samego połączenia (retransmisja UDP).
+     */
     private void handleJoinRequest(Connection connection, JoinRequest request) {
-        if (playerConnectionMap.containsKey(connection.getID())) {
-            // We already processed this client's join request. 
-            // The client is retransmitting because our AckPacket or JoinAccepted was lost/blocked.
+        if (playerConnectionMap.containsKey(connection.getID()))
             return;
-        }
 
         int playerId = playerIdGenerator.getAndIncrement();
         playerConnectionMap.put(connection.getID(), playerId);
         Gdx.app.log("GameServer", "Player joined: " + request.playerName + " (ID: " + playerId + ")");
 
-        // 1. Send JoinAccepted
         reliabilityManager.send(connection, new JoinAccepted(playerId));
 
-        // 2. Register with race manager (lobby tracking)
         raceManager.onPlayerJoined(playerId, connection, request.playerName);
 
-        // 3. Send MapData in chunks
         sendMapData(connection);
     }
 
+    /**
+     * Ładuje mapę serwera z pliku lub tworzy domyślny tor kwadratowy.
+     */
     private void initializeMap() {
         trackGenerator = new TrackGenerator();
-        // The server looks for this specific file in its working directory (usually root or server folder)
         String serverMapFile = "Maps/server_map.json";
-        
+
         if (!trackGenerator.loadMap(serverMapFile)) {
             Gdx.app.log("GameServer", "No saved map found at " + serverMapFile + ". Creating default track.");
             trackGenerator.addPoint(-20, -20);
@@ -155,7 +160,7 @@ public class GameServer extends ApplicationAdapter {
             trackGenerator.addPoint(20, 20);
             trackGenerator.addPoint(-20, 20);
         }
-        
+
         Json json = new Json();
         json.setOutputType(JsonWriter.OutputType.json);
         mapJson = json.toJson(trackGenerator.exportData());
@@ -163,6 +168,11 @@ public class GameServer extends ApplicationAdapter {
                 + " bytes. Track points: " + trackGenerator.getManualPoints().size);
     }
 
+    /**
+     * Wysyła dane mapy w fragmentach po {@link #CHUNK_SIZE} bajtów.
+     *
+     * @param connection połączenie docelowego klienta
+     */
     private void sendMapData(Connection connection) {
         int totalChunks = (int) Math.ceil((double) mapJson.length() / CHUNK_SIZE);
         for (int i = 0; i < totalChunks; i++) {
@@ -174,17 +184,16 @@ public class GameServer extends ApplicationAdapter {
         Gdx.app.log("GameServer", "Sent " + totalChunks + " chunks of map data to connection " + connection.getID());
     }
 
+    /** Aktualizuje retransmisje UDP i logikę wyścigu (~30 Hz). */
     @Override
     public void render() {
-        // Update reliability manager to handle retransmissions
         reliabilityManager.update();
 
-        // Drive the authoritative race FSM (~30 Hz via HeadlessApplication)
-        if (raceManager != null) {
+        if (raceManager != null)
             raceManager.update(Gdx.graphics.getDeltaTime());
-        }
     }
 
+    /** Zatrzymuje serwer KryoNet. */
     @Override
     public void dispose() {
         server.stop();

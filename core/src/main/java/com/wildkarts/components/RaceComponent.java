@@ -3,44 +3,39 @@ package com.wildkarts.components;
 import com.badlogic.ashley.core.Component;
 
 /**
- * Singleton component attached to a "race manager" entity.
- * Tracks the current phase of the race, configuration, and global timers.
+ * Pojedynczy komponent na encji „menedżera wyścigu”.
+ * Śledzi bieżącą fazę wyścigu, konfigurację i globalne timery.
  */
 public class RaceComponent implements Component {
 
+    /** Aktualna faza wyścigu. */
     public RaceState currentState = RaceState.WAITING_FOR_PLAYERS;
 
-    /** Seconds remaining in the pre-race countdown. */
+    /** Pozostałe sekundy odliczania przed startem. */
     public float countdownTimer = 3.0f;
 
-    /** Total elapsed time since RACING began (seconds). */
+    /** Całkowity czas od rozpoczęcia fazy {@link RaceState#RACING} (sekundy). */
     public float raceTimer = 0.0f;
 
-    // ─── Configuration ────────────────────────────────────────────────
-
-    /** Number of laps required to finish the race. */
+    /** Wymagana liczba okrążeń do ukończenia wyścigu. */
     public int maxLaps = 3;
 
-    /** Number of sectors the track is divided into. */
+    /** Liczba sektorów, na które podzielony jest tor. */
     public int totalSectors = 3;
 
-    /** Total number of control points on the track (sourced from TrackGenerator). */
+    /** Łączna liczba punktów kontrolnych toru (z {@link com.wildkarts.track.TrackGenerator}). */
     public int totalTrackPoints = 0;
 
-    // ─── Ready / Lobby ────────────────────────────────────────────────
-
-    /** Number of players who signaled "ready". */
+    /** Liczba graczy, którzy zgłosili gotowość. */
     public int readyPlayers = 0;
 
-    /** Number of players that must be ready before COUNTDOWN starts. */
+    /** Liczba graczy wymagana do rozpoczęcia {@link RaceState#COUNTDOWN}. */
     public int requiredPlayers = 1;
 
-    // ─── Multiplayer Authority ────────────────────────────────────────
-
     /**
-     * When true, the client-side {@link com.wildkarts.systems.RaceStateSystem}
-     * and {@link com.wildkarts.systems.LapSectorSystem} do not mutate race
-     * state on their own — they only mirror values pushed by the server.
+     * Gdy {@code true}, klienckie {@link com.wildkarts.systems.RaceStateSystem}
+     * i {@link com.wildkarts.systems.LapSectorSystem} nie zmieniają stanu samodzielnie —
+     * tylko odzwierciedlają wartości wysyłane przez serwer.
      */
     public boolean serverAuthoritative = false;
 }

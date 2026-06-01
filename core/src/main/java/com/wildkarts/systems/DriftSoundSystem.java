@@ -13,8 +13,8 @@ import com.wildkarts.components.CarComponent;
 import com.wildkarts.components.InputComponent;
 
 /**
- * Plays a looping tire screech SFX when the local player's car is drifting.
- * Volume scales with the rear slip angle magnitude for a dynamic effect.
+ * Odtwarza zapętlony dźwięk piszczących opon, gdy lokalne auto driftuje.
+ * Głośność skaluje się z kątem poślizgu tylnej osi.
  */
 public class DriftSoundSystem extends EntitySystem {
 
@@ -30,6 +30,7 @@ public class DriftSoundSystem extends EntitySystem {
 
     private ImmutableArray<Entity> localCars;
 
+    /** Ładuje dźwięk driftu i buforuje encje lokalnego gracza. */
     @Override
     public void addedToEngine(Engine engine) {
         localCars = engine.getEntitiesFor(
@@ -37,6 +38,9 @@ public class DriftSoundSystem extends EntitySystem {
         driftSound = Gdx.audio.newSound(Gdx.files.internal("sounds/Drift_SFX.ogg"));
     }
 
+    /**
+     * Włącza, reguluje głośność lub wyłącza pętlę dźwięku driftu.
+     */
     @Override
     public void update(float deltaTime) {
         if (localCars.size() == 0) return;
@@ -52,15 +56,14 @@ public class DriftSoundSystem extends EntitySystem {
             } else {
                 driftSound.setVolume(loopId, volume);
             }
-        } else {
-            if (playing) {
-                driftSound.stop(loopId);
-                playing = false;
-                loopId = -1;
-            }
+        } else if (playing) {
+            driftSound.stop(loopId);
+            playing = false;
+            loopId = -1;
         }
     }
 
+    /** Oblicza głośność na podstawie efektywnego kąta poślizgu tylnej osi. */
     private float computeVolume(CarComponent car) {
         float absSlip = Math.abs(car.rearSlipAngleEffective);
         float peak = car.rearPeakSlipAngle;
@@ -72,11 +75,13 @@ public class DriftSoundSystem extends EntitySystem {
                 SLIP_VOLUME_MIN, SLIP_VOLUME_MAX);
     }
 
+    /** Zatrzymuje dźwięk przy usuwaniu systemu z silnika. */
     @Override
     public void removedFromEngine(Engine engine) {
         dispose();
     }
 
+    /** Zatrzymuje pętlę i zwalnia zasób dźwięku. */
     public void dispose() {
         if (playing && loopId != -1) {
             driftSound.stop(loopId);

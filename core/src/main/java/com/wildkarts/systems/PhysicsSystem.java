@@ -1,21 +1,22 @@
 package com.wildkarts.systems;
 
 import com.badlogic.ashley.core.ComponentMapper;
+import com.badlogic.ashley.core.Engine;
 import com.badlogic.ashley.core.Entity;
 import com.badlogic.ashley.core.EntitySystem;
 import com.badlogic.ashley.core.Family;
 import com.badlogic.ashley.utils.ImmutableArray;
-import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.World;
 import com.wildkarts.components.CarComponent;
 import com.wildkarts.components.InputComponent;
 import com.wildkarts.components.PhysicsComponent;
 
 /**
- * Box2D fixed timestep with per-step vehicle force application.
+ * Box2D ze stałym krokiem czasu i nakładaniem sił pojazdu w każdym podkroku.
  */
 public class PhysicsSystem extends EntitySystem {
 
+    /** Stały krok symulacji fizyki (1/60 s). */
     public static final float FIXED_TIME_STEP = 1f / 60f;
 
     private static final float MAX_FRAME_TIME = 0.25f;
@@ -33,18 +34,29 @@ public class PhysicsSystem extends EntitySystem {
     private ImmutableArray<Entity> physicsEntities;
     private ImmutableArray<Entity> drivenCars;
 
+    /**
+     * Tworzy system fizyki powiązany ze światem Box2D.
+     *
+     * @param world świat Box2D
+     */
     public PhysicsSystem(World world) {
         super();
         this.world = world;
     }
 
+    /**
+     * Buforuje listy encji z komponentami fizyki i sterowanych aut.
+     */
     @Override
-    public void addedToEngine(com.badlogic.ashley.core.Engine engine) {
+    public void addedToEngine(Engine engine) {
         physicsEntities = engine.getEntitiesFor(Family.all(PhysicsComponent.class).get());
         drivenCars = engine.getEntitiesFor(
                 Family.all(InputComponent.class, CarComponent.class, PhysicsComponent.class).get());
     }
 
+    /**
+     * Wykonuje stałokrokową symulację Box2D z akumulatorem czasu klatki.
+     */
     @Override
     public void update(float deltaTime) {
         float frameTime = Math.min(deltaTime, MAX_FRAME_TIME);
@@ -52,14 +64,13 @@ public class PhysicsSystem extends EntitySystem {
 
         while (accumulator >= FIXED_TIME_STEP) {
             snapshotPreviousTransforms();
-
             simulateDrivenVehicles();
-
             world.step(FIXED_TIME_STEP, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
             accumulator -= FIXED_TIME_STEP;
         }
     }
 
+    /** Zapisuje poprzednią pozycję i kąt przed krokiem fizyki (do interpolacji renderu). */
     private void snapshotPreviousTransforms() {
         if (physicsEntities == null) return;
         for (Entity entity : physicsEntities) {
@@ -71,6 +82,7 @@ public class PhysicsSystem extends EntitySystem {
         }
     }
 
+    /** Symuluje jeden podkrok ruchu dla aut sterowanych przez gracza. */
     private void simulateDrivenVehicles() {
         if (drivenCars == null) return;
         for (Entity entity : drivenCars) {
@@ -82,10 +94,20 @@ public class PhysicsSystem extends EntitySystem {
         }
     }
 
+    /**
+     * Zwraca świat Box2D używany przez ten system.
+     *
+     * @return instancja {@link World}
+     */
     public World getWorld() {
         return world;
     }
 
+    /**
+     * Współczynnik interpolacji między poprzednią a bieżącą pozycją (0…1).
+     *
+     * @return alpha do renderowania płynnego ruchu między krokami fizyki
+     */
     public float getInterpolationAlpha() {
         return accumulator / FIXED_TIME_STEP;
     }

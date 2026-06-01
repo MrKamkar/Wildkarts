@@ -1,14 +1,15 @@
 package com.wildkarts.net;
 
 import com.esotericsoftware.kryonet.Connection;
+
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Manages reliable UDP delivery over KryoNet.
- * Automatically assigns sequence IDs and retransmits packets if an ACK is not received.
+ * Zarządza niezawodną dostawą UDP przez KryoNet.
+ * Automatycznie przypisuje identyfikatory sekwencji i retransmituje pakiety bez ACK.
  */
 public class UdpReliabilityManager {
 
@@ -21,11 +22,11 @@ public class UdpReliabilityManager {
     private Runnable onMaxRetriesExceeded;
 
     /**
-     * Sends a reliable packet over UDP.
-     * The manager assigns the sequenceId and handles retransmission.
+     * Wysyła pakiet niezawodny przez UDP.
+     * Menedżer przypisuje {@code sequenceId} i obsługuje retransmisję.
      *
-     * @param connection the KryoNet connection to send on
-     * @param packet     the reliable packet to send
+     * @param connection połączenie KryoNet
+     * @param packet     pakiet niezawodny do wysłania
      */
     public void send(Connection connection, ReliablePacket packet) {
         packet.sequenceId = sequenceCounter.getAndIncrement();
@@ -34,16 +35,16 @@ public class UdpReliabilityManager {
     }
 
     /**
-     * Call this when an AckPacket is received.
+     * Wywoływane po odebraniu {@link AckPacket}.
      *
-     * @param acknowledgedId the sequenceId that was acknowledged
+     * @param acknowledgedId potwierdzony identyfikator sekwencji
      */
     public void onAckReceived(long acknowledgedId) {
         pendingPackets.remove(acknowledgedId);
     }
 
     /**
-     * Must be called regularly (e.g., in the render/update loop) to process retransmissions.
+     * Wywoływane regularnie (np. w pętli render/update) w celu obsługi retransmisji.
      */
     public void update() {
         long now = System.currentTimeMillis();
@@ -57,9 +58,8 @@ public class UdpReliabilityManager {
                 pending.retryCount++;
                 if (pending.retryCount > MAX_RETRIES) {
                     iterator.remove();
-                    if (onMaxRetriesExceeded != null) {
+                    if (onMaxRetriesExceeded != null)
                         onMaxRetriesExceeded.run();
-                    }
                 } else {
                     pending.lastSentTime = now;
                     pending.connection.sendUDP(pending.packet);
@@ -68,15 +68,26 @@ public class UdpReliabilityManager {
         }
     }
 
+    /** Czyści kolejkę oczekujących pakietów i resetuje licznik sekwencji. */
     public void reset() {
         pendingPackets.clear();
         sequenceCounter.set(1);
     }
 
+    /**
+     * Sprawdza, czy są jeszcze pakiety oczekujące na potwierdzenie.
+     *
+     * @return {@code true} gdy kolejka nie jest pusta
+     */
     public boolean hasPending() {
         return !pendingPackets.isEmpty();
     }
 
+    /**
+     * Ustawia callback wywoływany po przekroczeniu maksymalnej liczby ponownych prób.
+     *
+     * @param callback akcja do wykonania (może być {@code null})
+     */
     public void setOnMaxRetriesExceeded(Runnable callback) {
         this.onMaxRetriesExceeded = callback;
     }

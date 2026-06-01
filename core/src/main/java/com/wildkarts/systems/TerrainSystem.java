@@ -11,15 +11,15 @@ import com.wildkarts.components.TerrainComponent;
 import com.wildkarts.track.TrackGenerator;
 
 /**
- * Resolves the surface under each car each frame and writes the appropriate
- * physics modifiers (mu, max speed, engine force, rolling resistance, aero drag)
- * onto its CarComponent.
+ * Rozpoznaje powierzchnię pod każdym autem co klatkę i zapisuje odpowiednie
+ * modyfikatory fizyki (mu, max prędkość, siła silnika, opór toczenia, opór aerodynamiczny)
+ * w {@link CarComponent}.
  *
- * Must run BEFORE MovementSystem so the modified values are picked up the
- * same physics step the car crosses a tile boundary.
+ * <p>Musi działać PRZED {@link MovementSystem}, aby zmiany zostały uwzględnione
+ * w tym samym kroku fizyki, w którym auto przekracza granicę kafelka.</p>
  *
- * All tuning is driven by fields on CarComponent ({@code grass*Multiplier},
- * {@code surfaceMu*}) so the balance is editable in one place.
+ * <p>Balans sterowany polami {@link CarComponent} ({@code grass*Multiplier}, {@code surfaceMu*})
+ * — edytowalny w jednym miejscu.</p>
  */
 public class TerrainSystem extends IteratingSystem {
 
@@ -30,10 +30,14 @@ public class TerrainSystem extends IteratingSystem {
     private final ComponentMapper<CarComponent> carMapper =
             ComponentMapper.getFor(CarComponent.class);
 
+    /** Tworzy system dla encji z terenem, fizyką i komponentem auta. */
     public TerrainSystem() {
         super(Family.all(TerrainComponent.class, PhysicsComponent.class, CarComponent.class).get());
     }
 
+    /**
+     * Sprawdza kafelek pod autem i stosuje parametry drogi lub trawy.
+     */
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         TerrainComponent terrain = terrainMapper.get(entity);
@@ -45,14 +49,13 @@ public class TerrainSystem extends IteratingSystem {
         Vector2 pos = physics.body.getPosition();
         terrain.currentTile = terrain.trackGenerator.getTileAt(pos.x, pos.y);
 
-        if (terrain.currentTile == TrackGenerator.TILE_ROAD) {
+        if (terrain.currentTile == TrackGenerator.TILE_ROAD)
             applyRoadSurface(car, physics, terrain);
-        } else {
+        else
             applyOffRoadSurface(car, physics, terrain);
-        }
     }
 
-    /** Restores all physics knobs to their spawn-time defaults. */
+    /** Przywraca domyślne parametry fizyki z momentu spawnu (droga). */
     private static void applyRoadSurface(CarComponent car, PhysicsComponent physics, TerrainComponent terrain) {
         car.maxForwardSpeed = terrain.defaultMaxForwardSpeed;
         car.engineForce = terrain.defaultEngineForce;
@@ -64,9 +67,8 @@ public class TerrainSystem extends IteratingSystem {
     }
 
     /**
-     * Soft "bog down" profile: reduced top speed and torque so the wheels don't just spin in place,
-     * higher rolling/aero/Box2D damping for smooth bleed-off, much higher angular damping so the
-     * car can't just keep spinning sideways forever once it leaves the track.
+     * Profil „zatonienia” poza drogą: niższa prędkość i moment obrotowy,
+     * wyższe tłumienie liniowe/kątowe Box2D — auto nie może wiecznie jeździć bokiem po trawie.
      */
     private static void applyOffRoadSurface(CarComponent car, PhysicsComponent physics, TerrainComponent terrain) {
         car.maxForwardSpeed = terrain.defaultMaxForwardSpeed * car.grassMaxSpeedMultiplier;

@@ -13,11 +13,11 @@ import com.wildkarts.components.RaceComponent;
 import com.wildkarts.components.RaceState;
 
 /**
- * Maps keyboard input to InputComponent values.
- * 
- * Multiplayer note: In a networked game, this system runs ONLY on the local client.
- * On the server (or for remote players), a NetworkInputSystem would populate
- * InputComponent from received network packets instead.
+ * Mapuje wejście z klawiatury na wartości {@link InputComponent}.
+ *
+ * <p>Multiplayer: ten system działa TYLKO na lokalnym kliencie.
+ * Na serwerze (lub dla zdalnych graczy) {@link InputComponent} wypełniałby
+ * system sieciowy z odebranych pakietów.</p>
  */
 public class InputSystem extends IteratingSystem {
 
@@ -28,19 +28,25 @@ public class InputSystem extends IteratingSystem {
 
     private ImmutableArray<Entity> raceEntities;
 
-    /** Set by GameScreen to block all kart input when an overlay menu is open. */
+    /**
+     * Ustawiane przez {@link com.wildkarts.GameScreen} — blokuje sterowanie,
+     * gdy otwarte jest menu nakładki.
+     */
     public boolean externalInputBlocked = false;
 
+    /** Tworzy system przetwarzający encje z {@link InputComponent}. */
     public InputSystem() {
         super(Family.all(InputComponent.class).get());
     }
 
+    /** Pobiera encję z {@link RaceComponent} do sprawdzania fazy wyścigu. */
     @Override
     public void addedToEngine(Engine engine) {
         super.addedToEngine(engine);
         raceEntities = engine.getEntitiesFor(Family.all(RaceComponent.class).get());
     }
 
+    /** Sprawdza, czy faza wyścigu blokuje sterowanie (poza RACING i PRACTICE). */
     private boolean isRaceInputBlocked() {
         if (raceEntities == null || raceEntities.size() == 0) return false;
         RaceComponent race = raceMapper.get(raceEntities.first());
@@ -49,6 +55,9 @@ public class InputSystem extends IteratingSystem {
                 && race.currentState != RaceState.PRACTICE;
     }
 
+    /**
+     * Odczytuje klawisze WASD i spację, zapisując wynik w komponencie wejścia.
+     */
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         InputComponent input = inputMapper.get(entity);
@@ -60,25 +69,18 @@ public class InputSystem extends IteratingSystem {
             return;
         }
 
-        // Throttle: W = forward, S = reverse
         input.throttle = 0f;
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) {
+        if (Gdx.input.isKeyPressed(Input.Keys.W))
             input.throttle += 1f;
-        }
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) {
+        if (Gdx.input.isKeyPressed(Input.Keys.S))
             input.throttle -= 1f;
-        }
 
-        // Steering: A = left (positive CCW), D = right (negative CW)
         input.steering = 0f;
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) {
+        if (Gdx.input.isKeyPressed(Input.Keys.A))
             input.steering += 1f;
-        }
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) {
+        if (Gdx.input.isKeyPressed(Input.Keys.D))
             input.steering -= 1f;
-        }
 
-        // Handbrake / drift: Space
         input.braking = Gdx.input.isKeyPressed(Input.Keys.SPACE);
     }
 }

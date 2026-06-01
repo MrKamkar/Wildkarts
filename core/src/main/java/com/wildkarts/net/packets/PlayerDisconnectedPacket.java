@@ -1,14 +1,23 @@
 package com.wildkarts.net.packets;
 
 /**
- * Sent by the server when a player disconnects.
- * Clients use this to remove the corresponding car entity.
+ * Wysyłany przez serwer, gdy gracz rozłącza się.
+ * Klienci używają go do usunięcia odpowiadającej encji auta.
  */
 public class PlayerDisconnectedPacket {
+
+    /** Identyfikator rozłączonego gracza. */
     public int playerId;
 
-    public PlayerDisconnectedPacket() {}
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
+    public PlayerDisconnectedPacket() {
+    }
 
+    /**
+     * Tworzy pakiet rozłączenia gracza.
+     *
+     * @param playerId identyfikator gracza
+     */
     public PlayerDisconnectedPacket(int playerId) {
         this.playerId = playerId;
     }

@@ -3,19 +3,27 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Sent when a player uses a power-up. Must arrive reliably
- * so all clients can display the effect and apply game logic.
+ * Wysyłany, gdy gracz używa power-upu. Musi dotrzeć niezawodnie,
+ * aby wszyscy klienci mogli wyświetlić efekt i zastosować logikę gry.
  */
 public class PowerUpUsed extends ReliablePacket {
 
+    /** Identyfikator gracza używającego power-upu. */
     public int playerId;
 
-    /** Power-up type identifier (e.g., 0 = boost, 1 = shell, 2 = banana). */
+    /** Typ power-upu (np. 0 = boost, 1 = shell, 2 = banana). */
     public int powerUpType;
 
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public PowerUpUsed() {
     }
 
+    /**
+     * Tworzy pakiet użycia power-upu.
+     *
+     * @param playerId    identyfikator gracza
+     * @param powerUpType typ power-upu
+     */
     public PowerUpUsed(int playerId, int powerUpType) {
         this.playerId = playerId;
         this.powerUpType = powerUpType;

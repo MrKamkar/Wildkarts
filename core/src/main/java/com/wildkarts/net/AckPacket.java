@@ -1,21 +1,25 @@
 package com.wildkarts.net;
 
 /**
- * Acknowledgement packet — sent in response to any ReliablePacket.
- * Contains the sequenceId of the packet being acknowledged.
+ * Pakiet potwierdzenia — wysyłany w odpowiedzi na {@link ReliablePacket}.
+ * Zawiera {@code sequenceId} potwierdzanego pakietu.
  *
- * This is NOT a NetPacket subclass — it's a lightweight control message
- * that doesn't need its own sequence tracking.
+ * <p>Nie rozszerza {@link NetPacket} — to lekka wiadomość kontrolna bez własnej sekwencji.</p>
  */
 public class AckPacket {
 
-    /** The sequenceId of the ReliablePacket being acknowledged. */
+    /** Identyfikator sekwencji potwierdzanego {@link ReliablePacket}. */
     public long acknowledgedId;
 
-    /** No-arg constructor required by Kryo. */
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public AckPacket() {
     }
 
+    /**
+     * Tworzy potwierdzenie dla podanego identyfikatora sekwencji.
+     *
+     * @param acknowledgedId identyfikator potwierdzanego pakietu
+     */
     public AckPacket(long acknowledgedId) {
         this.acknowledgedId = acknowledgedId;
     }

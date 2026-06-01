@@ -3,17 +3,23 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Sent by the server to confirm a player has joined.
- * Contains the player's assigned ID for the session.
+ * Wysyłany przez serwer w celu potwierdzenia dołączenia gracza.
+ * Zawiera przypisany identyfikator gracza na czas sesji.
  */
 public class JoinAccepted extends ReliablePacket {
 
-    /** Unique player ID assigned by the server. */
+    /** Unikalny identyfikator gracza nadany przez serwer. */
     public int playerId;
 
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public JoinAccepted() {
     }
 
+    /**
+     * Tworzy potwierdzenie dołączenia z przypisanym identyfikatorem.
+     *
+     * @param playerId identyfikator gracza
+     */
     public JoinAccepted(int playerId) {
         this.playerId = playerId;
     }

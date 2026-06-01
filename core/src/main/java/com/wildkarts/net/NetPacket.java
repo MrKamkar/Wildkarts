@@ -1,13 +1,13 @@
 package com.wildkarts.net;
 
 /**
- * Base class for all network packets.
- * Every packet carries a sequence ID for tracking and ordering.
+ * Klasa bazowa wszystkich pakietów sieciowych.
+ * Każdy pakiet niesie identyfikator sekwencji do śledzenia i porządkowania.
  *
- * Subclasses: ReliablePacket (ACK required), UnreliablePacket (fire-and-forget).
+ * <p>Podklasy: {@link ReliablePacket} (wymaga ACK), {@link UnreliablePacket} (bez potwierdzenia).</p>
  */
 public abstract class NetPacket {
 
-    /** Monotonically increasing ID assigned by the sender. */
+    /** Monotonicznie rosnący identyfikator przypisywany przez nadawcę. */
     public long sequenceId;
 }

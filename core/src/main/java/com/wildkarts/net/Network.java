@@ -1,42 +1,53 @@
 package com.wildkarts.net;
 
 import com.esotericsoftware.kryo.Kryo;
-import com.wildkarts.net.packets.*;
+import com.wildkarts.net.packets.GridAssignmentPacket;
+import com.wildkarts.net.packets.JoinAccepted;
+import com.wildkarts.net.packets.JoinRequest;
+import com.wildkarts.net.packets.LobbyStatusPacket;
+import com.wildkarts.net.packets.MapData;
+import com.wildkarts.net.packets.MapReadyPacket;
+import com.wildkarts.net.packets.PlayerDisconnectedPacket;
+import com.wildkarts.net.packets.PlayerPassedPointPacket;
+import com.wildkarts.net.packets.PlayerPositionPacket;
+import com.wildkarts.net.packets.PlayerReadyPacket;
+import com.wildkarts.net.packets.PowerUpUsed;
+import com.wildkarts.net.packets.RacePositionsUpdatePacket;
+import com.wildkarts.net.packets.RaceResultsPacket;
+import com.wildkarts.net.packets.RaceStateChangedPacket;
+import com.wildkarts.net.packets.SectorTimePacket;
+import com.wildkarts.net.packets.StartGamePacket;
 
 /**
- * Central network configuration — port constants and Kryo class registration.
+ * Centralna konfiguracja sieci — stałe portów i rejestracja klas Kryo.
  *
- * IMPORTANT: Registration order must be IDENTICAL on client and server.
- * KryoNet uses class IDs internally; mismatched order = deserialization failures.
+ * <p>WAŻNE: kolejność rejestracji musi być IDENTYCZNA po stronie klienta i serwera.
+ * KryoNet używa wewnętrznych identyfikatorów klas; rozbieżna kolejność = błędy deserializacji.</p>
  */
 public final class Network {
 
-    /** TCP port — used by KryoNet for connection management. */
+    /** Port TCP — używany przez KryoNet do zarządzania połączeniem. */
     public static final int TCP_PORT = 54555;
 
-    /** UDP port — all game traffic flows through here. */
+    /** Port UDP — cały ruch gry przepływa tą ścieżką. */
     public static final int UDP_PORT = 54556;
 
     private Network() {
-        // Utility class — no instantiation
     }
 
     /**
-     * Registers all packet classes with Kryo.
-     * Must be called on both client and server Kryo instances.
+     * Rejestruje wszystkie klasy pakietów w instancji Kryo.
+     * Musi być wywołane na obu instancjach Kryo (klient i serwer).
      *
-     * @param kryo the Kryo instance from KryoNet's Client or Server
+     * @param kryo instancja Kryo z KryoNet {@code Client} lub {@code Server}
      */
     public static void register(Kryo kryo) {
-        // Primitive array types used in packets
         kryo.register(float[].class);
         kryo.register(int[].class);
         kryo.register(String[].class);
 
-        // Control packets
         kryo.register(AckPacket.class);
 
-        // Reliable game packets
         kryo.register(JoinRequest.class);
         kryo.register(JoinAccepted.class);
         kryo.register(MapData.class);
@@ -44,7 +55,6 @@ public final class Network {
         kryo.register(StartGamePacket.class);
         kryo.register(PowerUpUsed.class);
 
-        // Race / lobby packets (reliable)
         kryo.register(PlayerReadyPacket.class);
         kryo.register(LobbyStatusPacket.class);
         kryo.register(RaceStateChangedPacket.class);
@@ -53,7 +63,6 @@ public final class Network {
         kryo.register(GridAssignmentPacket.class);
         kryo.register(RaceResultsPacket.class);
 
-        // Unreliable game packets
         kryo.register(PlayerPositionPacket.class);
         kryo.register(PlayerDisconnectedPacket.class);
         kryo.register(RacePositionsUpdatePacket.class);

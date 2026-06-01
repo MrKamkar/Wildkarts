@@ -3,44 +3,52 @@ package com.wildkarts.net.packets;
 import com.wildkarts.net.ReliablePacket;
 
 /**
- * Server -> single client: authoritative result of a validated
- * {@link PlayerPassedPointPacket}. The server has accepted the point pass
- * and is reporting back the updated progress state for the receiving
- * player. The client overwrites its local LapComponent with these values.
+ * Serwer → pojedynczy klient: autorytatywny wynik zatwierdzonego {@link PlayerPassedPointPacket}.
+ * Serwer zaakceptował minięcie punktu i zwraca zaktualizowany postęp odbierającemu graczowi.
+ * Klient nadpisuje lokalny {@link com.wildkarts.components.LapComponent} tymi wartościami.
  *
- * If {@code sectorIndex < 0}, the passed point was an intermediate point
- * (not a sector boundary) — only the advancement fields are meaningful.
+ * <p>Gdy {@code sectorIndex < 0}, minięty punkt był pośredni (nie granica sektora) —
+ * znaczenie mają tylko pola postępu.</p>
  */
 public class SectorTimePacket extends ReliablePacket {
 
+    /** Identyfikator gracza, którego dotyczy pakiet. */
     public int playerId;
 
-    /** Index of the sector just completed, or -1 if not a sector boundary. */
+    /** Indeks właśnie ukończonego sektora lub -1 gdy to nie granica sektora. */
     public int sectorIndex;
 
-    /** Time spent in the sector that just ended (seconds). */
+    /** Czas spędzony w sektorze, który właśnie się zakończył (sekundy). */
     public float sectorTime;
 
-    /** Delta vs. the player's personal best for this sector (s, signed). */
+    /** Delta względem rekordu osobistego tego sektora (s, ze znakiem). */
     public float delta;
 
-    /** Updated personal best for this sector. */
+    /** Zaktualizowany rekord osobisty tego sektora. */
     public float bestSectorTime;
 
+    /** Aktualne okrążenie gracza. */
     public int currentLap;
+
+    /** Indeks następnego punktu kontrolnego do minięcia. */
     public int nextTrackPointIndex;
+
+    /** Aktualny sektor (0 … totalSectors-1). */
     public int currentSector;
+
+    /** Czy gracz ukończył wyścig. */
     public boolean finished;
 
-    /** Authoritative race timer at the moment the sector ended. */
+    /** Autorytatywny timer wyścigu w momencie końca sektora. */
     public float raceTimerSnapshot;
 
-    /** Time of the just-completed lap (sum of sectors). 0 if not a lap boundary. */
+    /** Czas właśnie ukończonego okrążenia (suma sektorów). 0 gdy to nie granica okrążenia. */
     public float lastLapTime;
 
-    /** Player's personal best full lap time during practice. 0 if no lap completed. */
+    /** Rekord pełnego okrążenia treningowego. 0 gdy brak ukończonego okrążenia. */
     public float bestPracticeLapTime;
 
+    /** Konstruktor bezargumentowy wymagany przez Kryo. */
     public SectorTimePacket() {
     }
 }

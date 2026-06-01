@@ -6,17 +6,15 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.CatmullRomSpline;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 
 /**
- * Renders the track tile grid, finish line, and editor overlay (control points + spline curve).
+ * Renderuje siatkę kafelków toru, linię mety i nakładkę edytora (punkty kontrolne + spline).
  *
- * Tile rendering uses camera-based culling to only draw visible tiles,
- * avoiding the cost of rendering the full 200x200 grid every frame.
- *
- * Grass tiles are rendered as a tiled PNG texture (256x256, repeating pattern).
- * Road tiles are drawn on top using ShapeRenderer.
+ * <p>Render kafelków używa culling'u opartego na kamerze — rysowane są tylko widoczne obszary.
+ * Trawa to powtarzalna tekstura PNG; droga rysowana jest jako polygon wzdłuż spline.</p>
  */
 public class TrackRenderer {
 
@@ -24,32 +22,33 @@ public class TrackRenderer {
     private final SpriteBatch batch;
     private final Texture grassTexture;
 
-    /** World-space size (meters) of one grass texture repetition. */
+    /** Rozmiar jednego powtórzenia tekstury trawy w metrach świata. */
     private static final float GRASS_TILE_WORLD_SIZE = 4.0f;
 
-    // Terrain colors
     private static final Color ROAD_COLOR  = new Color(0.35f, 0.35f, 0.38f, 1f);
 
-    // Curb colors (alternating red/white racing kerb pattern)
     private static final Color CURB_RED   = new Color(0.9f, 0.15f, 0.1f, 1f);
     private static final Color CURB_WHITE = new Color(0.95f, 0.95f, 0.95f, 1f);
 
-    // Editor overlay colors
     private static final Color CONTROL_POINT_COLOR = new Color(1f, 0.4f, 0.2f, 1f);
     private static final Color SPLINE_COLOR = new Color(1f, 1f, 0.3f, 0.8f);
     private static final Color POINT_INDEX_COLOR = new Color(1f, 1f, 1f, 0.6f);
     private static final Color CHECKPOINT_GATE_COLOR = new Color(1f, 0.95f, 0.2f, 0.55f);
 
-    // Finish line colors
     private static final Color FINISH_BLACK = new Color(0.1f, 0.1f, 0.1f, 1f);
     private static final Color FINISH_WHITE = new Color(1f, 1f, 1f, 1f);
 
-    /** Number of checkered squares across the finish line. */
+    /** Liczba pól szachownicy w poprzek linii mety. */
     private static final int FINISH_CHECKER_COUNT = 12;
 
-    /** Thickness of the finish line strip in meters (along road direction). */
+    /** Grubość pasa linii mety w metrach (wzdłuż drogi). */
     private static final float FINISH_LINE_THICKNESS = 1.2f;
 
+    /**
+     * Tworzy renderer toru z teksturą trawy.
+     *
+     * @param grassTexture powtarzalna tekstura tła trawy
+     */
     public TrackRenderer(Texture grassTexture) {
         shapeRenderer = new ShapeRenderer();
         batch = new SpriteBatch();
@@ -57,8 +56,11 @@ public class TrackRenderer {
     }
 
     /**
-     * Renders the tile grid (grass texture + road + curbs) and finish line.
-     * Call BEFORE entity rendering so that tiles appear as background.
+     * Renderuje tło toru (trawa + droga + krawężniki) i linię mety.
+     * Wywołać PRZED renderowaniem encji, aby kafelki były w tle.
+     *
+     * @param camera kamera świata
+     * @param track  generator toru
      */
     public void render(OrthographicCamera camera, TrackGenerator track) {
         shapeRenderer.setProjectionMatrix(camera.combined);
@@ -69,8 +71,11 @@ public class TrackRenderer {
     }
 
     /**
-     * Renders editor overlay: control points and spline curve.
-     * Call AFTER entity rendering so overlay appears on top.
+     * Renderuje nakładkę edytora: punkty kontrolne, spline i bramki checkpointów.
+     * Wywołać PO renderowaniu encji, aby nakładka była na wierzchu.
+     *
+     * @param camera kamera świata
+     * @param track  generator toru
      */
     public void renderEditorOverlay(OrthographicCamera camera, TrackGenerator track) {
         shapeRenderer.setProjectionMatrix(camera.combined);
@@ -80,8 +85,7 @@ public class TrackRenderer {
         renderCheckpointGates(track);
     }
 
-    // ─── Tile Grid ─────────────────────────────────────────────────────
-
+    /** Rysuje teksturę trawy w widocznym obszarze kamery, potem polygon drogi. */
     private void renderTiles(OrthographicCamera camera, TrackGenerator track) {
         float halfW = camera.viewportWidth * camera.zoom / 2f;
         float halfH = camera.viewportHeight * camera.zoom / 2f;
@@ -90,7 +94,6 @@ public class TrackRenderer {
         float camBottom = camera.position.y - halfH;
         float camTop    = camera.position.y + halfH;
 
-        // --- Phase 1: tiled grass texture covering the entire visible area ---
         float visWidth  = camRight - camLeft;
         float visHeight = camTop - camBottom;
 
@@ -103,14 +106,10 @@ public class TrackRenderer {
         batch.draw(grassTexture, camLeft, camBottom, visWidth, visHeight, u, v, u2, v2);
         batch.end();
 
-        // --- Phase 2: smooth spline-based road polygon ---
         renderRoadSpline(track);
     }
 
-    /**
-     * Draws the road as a smooth polygon strip along the Catmull-Rom spline.
-     * Replaces per-tile rectangles for silky-smooth curved edges.
-     */
+    /** Rysuje drogę jako płaski pasek polygonów wzdłuż spline Catmull-Rom. */
     private void renderRoadSpline(TrackGenerator track) {
         CatmullRomSpline<Vector2> spline = track.getSpline();
         if (spline == null) return;
@@ -161,32 +160,25 @@ public class TrackRenderer {
         shapeRenderer.end();
     }
 
-    // ─── Curbs ─────────────────────────────────────────────────────────
-
+    /** Rysuje krawężniki wzdłuż krawędzi jezdni. */
     private void renderCurbs(TrackGenerator track) {
         Array<TrackGenerator.CurbSegment> curbs = track.getCurbs();
         if (curbs == null || curbs.size == 0) return;
 
-        float curbWidth = 1.0f; // Width along the road
-        float curbDepth = 0.6f; // Depth away from the road
+        float curbWidth = 1.0f;
+        float curbDepth = 0.6f;
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         for (TrackGenerator.CurbSegment seg : curbs) {
             shapeRenderer.setColor(seg.isRed ? CURB_RED : CURB_WHITE);
-            // Draw rotated rect around its center
             shapeRenderer.rect(seg.x - curbWidth / 2f, seg.y - curbDepth / 2f,
                     curbWidth / 2f, curbDepth / 2f,
-                    curbWidth, curbDepth, 1f, 1f, seg.rotationRad * com.badlogic.gdx.math.MathUtils.radiansToDegrees);
+                    curbWidth, curbDepth, 1f, 1f, seg.rotationRad * MathUtils.radiansToDegrees);
         }
         shapeRenderer.end();
     }
 
-    // ─── Finish Line ──────────────────────────────────────────────────
-
-    /**
-     * Draws a checkered black & white finish line perpendicular to the road
-     * at the first control point (start / finish position).
-     */
+    /** Rysuje szachownicę linii mety prostopadle do drogi przy pierwszym punkcie kontrolnym. */
     private void renderFinishLine(TrackGenerator track) {
         Array<Vector2> points = track.getManualPoints();
         if (points.size < 2) return;
@@ -195,33 +187,26 @@ public class TrackRenderer {
         Vector2 next = points.get(1);
         float halfWidth = track.getTrackHalfWidth();
 
-        // Road direction at start and its perpendicular
         Vector2 dir = new Vector2(next).sub(start).nor();
         Vector2 normal = new Vector2(-dir.y, dir.x);
 
-        // Along-road offset vectors (half thickness)
         float halfThick = FINISH_LINE_THICKNESS / 2f;
 
-        // Size of each checker square
         float totalWidth = halfWidth * 2f;
         float checkerSize = totalWidth / FINISH_CHECKER_COUNT;
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        // Draw two rows of checkers (along road direction)
         for (int row = 0; row < 2; row++) {
             for (int i = 0; i < FINISH_CHECKER_COUNT; i++) {
                 boolean isWhite = (i + row) % 2 == 0;
                 shapeRenderer.setColor(isWhite ? FINISH_WHITE : FINISH_BLACK);
 
-                // Position along the perpendicular (from -halfWidth to +halfWidth)
                 float t = -halfWidth + i * checkerSize;
                 float rowOffset = -halfThick + row * halfThick;
 
-                // Corner of this checker square in world space
                 float cx = start.x + normal.x * (t + checkerSize / 2f) + dir.x * (rowOffset + halfThick / 2f);
                 float cy = start.y + normal.y * (t + checkerSize / 2f) + dir.y * (rowOffset + halfThick / 2f);
 
-                // Draw rotated rectangle for this checker cell
                 drawRotatedRect(cx, cy, checkerSize, halfThick, dir, normal);
             }
         }
@@ -229,14 +214,13 @@ public class TrackRenderer {
     }
 
     /**
-     * Draws a filled rotated rectangle given center, size, and orientation vectors.
+     * Rysuje wypełniony obrócony prostokąt o podanym środku i wektorach orientacji.
      */
     private void drawRotatedRect(float cx, float cy, float w, float h,
                                   Vector2 dirAlong, Vector2 dirPerp) {
         float hw = w / 2f;
         float hh = h / 2f;
 
-        // 4 corners
         float x1 = cx - dirPerp.x * hw - dirAlong.x * hh;
         float y1 = cy - dirPerp.y * hw - dirAlong.y * hh;
         float x2 = cx + dirPerp.x * hw - dirAlong.x * hh;
@@ -250,8 +234,7 @@ public class TrackRenderer {
         shapeRenderer.triangle(x1, y1, x3, y3, x4, y4);
     }
 
-    // ─── Control Points ────────────────────────────────────────────────
-
+    /** Rysuje punkty kontrolne i linie łączące je w edytorze. */
     private void renderControlPoints(TrackGenerator track) {
         Array<Vector2> points = track.getManualPoints();
         if (points.size == 0) return;
@@ -260,12 +243,10 @@ public class TrackRenderer {
         for (int i = 0; i < points.size; i++) {
             Vector2 p = points.get(i);
 
-            // First point is green (start), rest are orange
-            if (i == 0) {
+            if (i == 0)
                 shapeRenderer.setColor(0.2f, 1f, 0.3f, 1f);
-            } else {
+            else
                 shapeRenderer.setColor(CONTROL_POINT_COLOR);
-            }
             shapeRenderer.circle(p.x, p.y, 0.5f, 16);
         }
         shapeRenderer.end();
@@ -289,10 +270,7 @@ public class TrackRenderer {
         }
     }
 
-    /**
-     * Draws full-width checkpoint gate lines at every control point so the
-     * editor shows the same detection geometry used during racing.
-     */
+    /** Rysuje bramki checkpointów na pełną szerokość drogi w edytorze. */
     private void renderCheckpointGates(TrackGenerator track) {
         Array<Vector2> points = track.getManualPoints();
         if (points.size < 3) return;
@@ -314,8 +292,7 @@ public class TrackRenderer {
         shapeRenderer.end();
     }
 
-    // ─── Spline Curve ──────────────────────────────────────────────────
-
+    /** Rysuje zamkniętą krzywą spline toru. */
     private void renderSpline(TrackGenerator track) {
         CatmullRomSpline<Vector2> spline = track.getSpline();
         if (spline == null) return;
@@ -333,15 +310,13 @@ public class TrackRenderer {
             shapeRenderer.line(prev.x, prev.y, curr.x, curr.y);
             prev.set(curr);
         }
-        // Close the loop
         spline.valueAt(curr, 0);
         shapeRenderer.line(prev.x, prev.y, curr.x, curr.y);
 
         shapeRenderer.end();
     }
 
-    // ─── Map Boundaries ───────────────────────────────────────────────
-
+    /** Rysuje czerwoną ramkę granic mapy. */
     private void renderGridBoundary(TrackGenerator track) {
         float x = track.getOriginX();
         float y = track.getOriginY();
@@ -354,6 +329,7 @@ public class TrackRenderer {
         shapeRenderer.end();
     }
 
+    /** Zwalnia zasoby {@link ShapeRenderer} i {@link SpriteBatch}. */
     public void dispose() {
         shapeRenderer.dispose();
         batch.dispose();

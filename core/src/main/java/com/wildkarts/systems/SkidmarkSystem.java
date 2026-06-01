@@ -14,7 +14,7 @@ import com.wildkarts.components.InputComponent;
 import com.wildkarts.components.PhysicsComponent;
 
 /**
- * Independent rear left / right wheel skid stripes (Pacejka past peak grip).
+ * Niezależne smugi poślizgu tylnych kół (Pacejka po przekroczeniu szczytu przyczepności).
  */
 public class SkidmarkSystem extends IteratingSystem {
 
@@ -33,12 +33,18 @@ public class SkidmarkSystem extends IteratingSystem {
 
     private int maxSegmentsPerWheel = 500;
 
+    /**
+     * Tworzy system smug poślizgu powiązany z kamerą świata.
+     *
+     * @param camera kamera ortograficzna
+     */
     public SkidmarkSystem(OrthographicCamera camera) {
         super(Family.all(InputComponent.class, CarComponent.class, PhysicsComponent.class).get());
         this.camera = camera;
         this.shapeRenderer = new ShapeRenderer();
     }
 
+    /** Aktualizuje smugi, wygasza stare segmenty i rysuje je na ekranie. */
     @Override
     public void update(float deltaTime) {
         super.update(deltaTime);
@@ -47,6 +53,7 @@ public class SkidmarkSystem extends IteratingSystem {
         drawStripes();
     }
 
+    /** Dodaje nowe segmenty smug dla obu tylnych kół auta. */
     @Override
     protected void processEntity(Entity entity, float deltaTime) {
         CarComponent car = carMapper.get(entity);
@@ -58,6 +65,7 @@ public class SkidmarkSystem extends IteratingSystem {
         updateWheel(rightTracker, rightStripes, car.rearRightWheelWorld, car.rearRightSkidActive, car);
     }
 
+    /** Śledzi odległość między pozycjami koła i dodaje segment smugi co określony odstęp. */
     private void updateWheel(WheelTracker tracker, Array<WheelStripe> stripes, Vector2 wheelPos,
                              boolean active, CarComponent car) {
         if (!active) {
@@ -65,24 +73,22 @@ public class SkidmarkSystem extends IteratingSystem {
             return;
         }
 
-        if (tracker.hasLast) {
+        if (tracker.hasLast)
             tracker.distanceSinceLast += wheelPos.dst(tracker.lastPos);
-        }
 
         if (!tracker.hasLast || tracker.distanceSinceLast >= car.skidmarkSpacing) {
-            if (tracker.hasLast) {
+            if (tracker.hasLast)
                 addWheelStripe(stripes, tracker.lastPos, wheelPos, car);
-            }
             tracker.lastPos.set(wheelPos);
             tracker.hasLast = true;
             tracker.distanceSinceLast = 0f;
         }
     }
 
+    /** Tworzy trójkątny segment smugi między dwoma pozycjami koła. */
     private void addWheelStripe(Array<WheelStripe> stripes, Vector2 from, Vector2 to, CarComponent car) {
-        while (stripes.size >= maxSegmentsPerWheel) {
+        while (stripes.size >= maxSegmentsPerWheel)
             stripes.removeIndex(0);
-        }
 
         float halfW = car.skidmarkWheelWidth * 0.5f;
         float dx = to.x - from.x;
@@ -106,16 +112,17 @@ public class SkidmarkSystem extends IteratingSystem {
         stripes.add(stripe);
     }
 
+    /** Usuwa segmenty, które przekroczyły czas wygaszania. */
     private void fadeStripes(Array<WheelStripe> stripes, float deltaTime) {
         for (int i = stripes.size - 1; i >= 0; i--) {
             WheelStripe s = stripes.get(i);
             s.age += deltaTime;
-            if (s.age >= s.maxAge) {
+            if (s.age >= s.maxAge)
                 stripes.removeIndex(i);
-            }
         }
     }
 
+    /** Rysuje wszystkie aktywne smugi obu kół. */
     private void drawStripes() {
         if (leftStripes.size == 0 && rightStripes.size == 0) return;
 
@@ -128,6 +135,7 @@ public class SkidmarkSystem extends IteratingSystem {
         shapeRenderer.end();
     }
 
+    /** Rysuje jedną listę segmentów z malejącą przezroczystością. */
     private void drawStripeArray(Array<WheelStripe> stripes) {
         for (WheelStripe s : stripes) {
             float t = 1f - s.age / s.maxAge;
@@ -137,10 +145,12 @@ public class SkidmarkSystem extends IteratingSystem {
         }
     }
 
+    /** Zwalnia {@link ShapeRenderer}. */
     public void dispose() {
         shapeRenderer.dispose();
     }
 
+    /** Śledzi ostatnią znaną pozycję koła między klatkami. */
     private static class WheelTracker {
         final Vector2 lastPos = new Vector2();
         boolean hasLast = false;
@@ -152,6 +162,7 @@ public class SkidmarkSystem extends IteratingSystem {
         }
     }
 
+    /** Pojedynczy segment smugi (cztery rogi trójkątów). */
     private static class WheelStripe {
         float lx1, ly1, rx1, ry1, lx2, ly2, rx2, ry2;
         float age;

@@ -20,20 +20,18 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
-import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.wildkarts.net.GameClient;
 
 /**
- * Main menu screen — displays the game title and navigation buttons.
- * Uses programmatic styles (no skin file required).
+ * Ekran menu głównego — wyświetla tytuł gry, pola nick/IP i przyciski nawigacji.
+ * Style UI są generowane programowo, bez zewnętrznego pliku skin.
  */
 public class MainMenuScreen implements Screen {
 
     private final Game game;
     private Stage stage;
 
-    // Disposable resources created programmatically
     private FreeTypeFontGenerator fontGenerator;
     private BitmapFont font;
     private Texture backgroundTexture;
@@ -46,22 +44,26 @@ public class MainMenuScreen implements Screen {
 
     private Label statusLabel;
 
+    /**
+     * Tworzy ekran menu powiązany z instancją gry LibGDX.
+     *
+     * @param game główna instancja gry
+     */
     public MainMenuScreen(Game game) {
         this.game = game;
     }
 
+    /**
+     * Inicjalizuje scenę menu, buduje widgety i uruchamia muzykę tła.
+     */
     @Override
     public void show() {
         stage = new Stage(new StretchViewport(1920, 1080));
         Gdx.input.setInputProcessor(stage);
 
-        // --- Load background ---
         backgroundTexture = new Texture(Gdx.files.internal("textures/background_menu.png"));
-
-        // --- Create font (FreeType for sharp rendering at any scale) ---
         font = createFont(28);
 
-        // --- Create button textures programmatically ---
         buttonUpTexture = createColorTexture(1, 1, new Color(0.25f, 0.25f, 0.3f, 0.85f));
         buttonDownTexture = createColorTexture(1, 1, new Color(0.45f, 0.45f, 0.5f, 0.9f));
         singlePlayerUpTexture = createColorTexture(1, 1, new Color(0.12f, 0.5f, 0.22f, 0.85f));
@@ -69,21 +71,18 @@ public class MainMenuScreen implements Screen {
         textFieldBgTexture = createColorTexture(1, 1, new Color(0.15f, 0.15f, 0.2f, 0.8f));
         cursorTexture = createColorTexture(2, 15, Color.WHITE);
 
-        // --- TextButton style ---
         TextButton.TextButtonStyle buttonStyle = new TextButton.TextButtonStyle();
         buttonStyle.font = font;
         buttonStyle.fontColor = Color.WHITE;
         buttonStyle.up = new TextureRegionDrawable(new TextureRegion(buttonUpTexture));
         buttonStyle.down = new TextureRegionDrawable(new TextureRegion(buttonDownTexture));
 
-        // --- Single Player button style (green) ---
         TextButton.TextButtonStyle singlePlayerStyle = new TextButton.TextButtonStyle();
         singlePlayerStyle.font = font;
         singlePlayerStyle.fontColor = Color.WHITE;
         singlePlayerStyle.up = new TextureRegionDrawable(new TextureRegion(singlePlayerUpTexture));
         singlePlayerStyle.down = new TextureRegionDrawable(new TextureRegion(singlePlayerDownTexture));
 
-        // --- TextField style ---
         TextField.TextFieldStyle textFieldStyle = new TextField.TextFieldStyle();
         textFieldStyle.font = font;
         textFieldStyle.fontColor = Color.WHITE;
@@ -91,20 +90,16 @@ public class MainMenuScreen implements Screen {
         textFieldStyle.cursor = new TextureRegionDrawable(new TextureRegion(cursorTexture));
         textFieldStyle.messageFontColor = new Color(0.6f, 0.6f, 0.6f, 1f);
 
-        // --- Nick Input Field ---
         TextField nickField = new TextField("", textFieldStyle);
         nickField.setMessageText("Gracz123");
 
-        // --- IP Input Field ---
         TextField ipField = new TextField("localhost", textFieldStyle);
 
-        // --- Status Label ---
         Label.LabelStyle statusStyle = new Label.LabelStyle();
         statusStyle.font = font;
         statusStyle.fontColor = Color.LIGHT_GRAY;
         statusLabel = new Label("", statusStyle);
 
-        // --- Single Player button ---
         TextButton singlePlayerButton = new TextButton("MAP EDITOR", singlePlayerStyle);
         singlePlayerButton.addListener(new ClickListener() {
             @Override
@@ -114,7 +109,6 @@ public class MainMenuScreen implements Screen {
             }
         });
 
-        // --- Connect button (multiplayer) ---
         TextButton connectButton = new TextButton("CONNECT", buttonStyle);
         connectButton.addListener(new ClickListener() {
             @Override
@@ -148,7 +142,6 @@ public class MainMenuScreen implements Screen {
             }
         });
 
-        // --- Exit button ---
         TextButton exitButton = new TextButton("EXIT", buttonStyle);
         exitButton.addListener(new ClickListener() {
             @Override
@@ -157,12 +150,10 @@ public class MainMenuScreen implements Screen {
             }
         });
 
-        // --- Root table with background image ---
         Table rootTable = new Table();
         rootTable.setFillParent(true);
         rootTable.setBackground(new TextureRegionDrawable(new TextureRegion(backgroundTexture)));
 
-        // --- Content table centered on the asphalt area ---
         Table content = new Table();
         content.center().left();
         content.padLeft(100f).padTop(300f);
@@ -186,10 +177,19 @@ public class MainMenuScreen implements Screen {
         startMenuMusic();
     }
 
+    /**
+     * Uruchamia muzykę tła menu głównego.
+     */
     private void startMenuMusic() {
         ScreenMusic.playTheme(ScreenMusic.MENU_THEME_PATH);
     }
 
+    /**
+     * Tworzy czcionkę bitmapową — FreeType gdy dostępny plik Roboto, w przeciwnym razie domyślna.
+     *
+     * @param size rozmiar czcionki w pikselach
+     * @return gotowa czcionka do użycia w UI
+     */
     private BitmapFont createFont(int size) {
         if (Gdx.files.internal("fonts/Roboto-Medium.ttf").exists()) {
             fontGenerator = new FreeTypeFontGenerator(Gdx.files.internal("fonts/Roboto-Medium.ttf"));
@@ -199,13 +199,20 @@ public class MainMenuScreen implements Screen {
             param.magFilter = TextureFilter.Linear;
             return fontGenerator.generateFont(param);
         }
-        // Fallback: default BitmapFont with linear filtering
         BitmapFont fallback = new BitmapFont();
         fallback.getRegion().getTexture().setFilter(TextureFilter.Linear, TextureFilter.Linear);
         fallback.getData().setScale(size / 15f);
         return fallback;
     }
 
+    /**
+     * Tworzy jednokolorową teksturę o podanym rozmiarze.
+     *
+     * @param width  szerokość w pikselach
+     * @param height wysokość w pikselach
+     * @param color  kolor wypełnienia
+     * @return nowa tekstura LibGDX
+     */
     private Texture createColorTexture(int width, int height, Color color) {
         Pixmap pixmap = new Pixmap(width, height, Pixmap.Format.RGBA8888);
         pixmap.setColor(color);
@@ -215,6 +222,11 @@ public class MainMenuScreen implements Screen {
         return texture;
     }
 
+    /**
+     * Czyści ekran, aktualizuje i rysuje scenę menu.
+     *
+     * @param delta czas od ostatniej klatki w sekundach
+     */
     @Override
     public void render(float delta) {
         Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
@@ -224,23 +236,33 @@ public class MainMenuScreen implements Screen {
         stage.draw();
     }
 
+    /**
+     * Dopasowuje viewport sceny do nowego rozmiaru okna.
+     *
+     * @param width  nowa szerokość okna
+     * @param height nowa wysokość okna
+     */
     @Override
     public void resize(int width, int height) {
         stage.getViewport().update(width, height, true);
     }
 
+    /** Pauzuje ekran — brak akcji w menu. */
     @Override
     public void pause() {
     }
 
+    /** Wznawia ekran — brak akcji w menu. */
     @Override
     public void resume() {
     }
 
+    /** Ukrywa ekran — brak akcji w menu. */
     @Override
     public void hide() {
     }
 
+    /** Zwalnia zasoby sceny, czcionek i tekstur menu. */
     @Override
     public void dispose() {
         if (stage != null) stage.dispose();
