@@ -42,8 +42,6 @@ public class ServerRaceManager {
     private static final int TOTAL_SECTORS = 3;
     private static final float COUNTDOWN_SECONDS = 3.0f;
 
-    private static final float POSITION_VALIDATION_RADIUS = 8f;
-
     /** Tick interval (in update calls) between leaderboard broadcasts. */
     private static final int POSITIONS_BROADCAST_INTERVAL_TICKS = 5;
 
@@ -248,12 +246,9 @@ public class ServerRaceManager {
         if (totalPoints < 3) return;
         if (packet.pointIndex < 0 || packet.pointIndex >= totalPoints) return;
 
-        Vector2 expected = trackPoints.get(packet.pointIndex);
-        float dx = expected.x - packet.x;
-        float dy = expected.y - packet.y;
-        if (dx * dx + dy * dy > POSITION_VALIDATION_RADIUS * POSITION_VALIDATION_RADIUS) {
+        if (!trackGenerator.isWithinCheckpointGate(packet.pointIndex, packet.x, packet.y)) {
             Gdx.app.log("ServerRaceManager", "Rejected point " + packet.pointIndex
-                    + " from player " + state.playerId + " — too far from claimed point.");
+                    + " from player " + state.playerId + " — outside checkpoint gate.");
             return;
         }
 

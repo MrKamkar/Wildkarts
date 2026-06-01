@@ -22,6 +22,9 @@ public class Lwjgl3Launcher {
 
         config.setWindowIcon("textures/icon.png");
 
+        // Blocks until the window is closed; force-exit afterwards so any
+        // lingering non-daemon threads (e.g. KryoNet) can't hang the process.
         new Lwjgl3Application(new WildKartsGame(), config);
+        System.exit(0);
     }
 }

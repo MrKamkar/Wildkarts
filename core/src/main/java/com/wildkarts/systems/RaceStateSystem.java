@@ -12,6 +12,7 @@ import com.wildkarts.components.RaceState;
  * Drives the race lifecycle finite state machine:
  * <pre>
  *   WAITING_FOR_PLAYERS  --(all ready)-->  COUNTDOWN
+ *   PRACTICE             --(all ready)-->  COUNTDOWN
  *   COUNTDOWN            --(timer == 0)--> RACING
  *   RACING               --(lap > max)--> FINISHED   (set by LapSectorSystem)
  * </pre>
@@ -37,9 +38,11 @@ public class RaceStateSystem extends IteratingSystem {
 
         switch (race.currentState) {
             case WAITING_FOR_PLAYERS:
+            case PRACTICE:
                 if (race.requiredPlayers > 0 && race.readyPlayers >= race.requiredPlayers) {
                     race.currentState = RaceState.COUNTDOWN;
                     race.countdownTimer = 3.0f;
+                    race.raceTimer = 0f;
                     Gdx.app.log("Race", "All players ready — countdown!");
                 }
                 break;

@@ -21,7 +21,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
-import com.badlogic.gdx.utils.viewport.FitViewport;
+import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.wildkarts.net.GameClient;
 
 /**
@@ -52,7 +52,7 @@ public class MainMenuScreen implements Screen {
 
     @Override
     public void show() {
-        stage = new Stage(new FitViewport(1920, 1080));
+        stage = new Stage(new StretchViewport(1920, 1080));
         Gdx.input.setInputProcessor(stage);
 
         // --- Load background ---
@@ -182,6 +182,12 @@ public class MainMenuScreen implements Screen {
 
         rootTable.add(content).expand().top().left();
         stage.addActor(rootTable);
+
+        startMenuMusic();
+    }
+
+    private void startMenuMusic() {
+        ScreenMusic.playTheme(ScreenMusic.MENU_THEME_PATH);
     }
 
     private BitmapFont createFont(int size) {

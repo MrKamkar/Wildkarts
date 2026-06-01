@@ -5,34 +5,30 @@ import com.badlogic.ashley.core.Entity;
 import com.badlogic.ashley.core.Family;
 import com.badlogic.ashley.systems.IteratingSystem;
 import com.badlogic.gdx.graphics.OrthographicCamera;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.Box2DDebugRenderer;
 import com.badlogic.gdx.physics.box2d.World;
 import com.wildkarts.components.CarComponent;
-import com.wildkarts.components.InputComponent;
 import com.wildkarts.components.PhysicsComponent;
+import com.wildkarts.util.SpriteAnchorUtil;
 
 /**
  * Renders car entities as sprites (SpriteBatch) with optional Box2D debug overlay.
  *
- * Sprite selection based on steering input:
- *   - No steering  → car_straight sprite
- *   - Steering right (D) → car_turn sprite (default orientation)
- *   - Steering left  (A) → car_turn sprite, horizontally flipped
+ * <p>Three sprites: {@code car_straight}, {@code car_turn_left}, {@code car_turn_right}
+ * (separate PNG files — no mirroring). Visual centers are aligned to the straight
+ * reference so swapping artwork does not shift the car on screen.</p>
  */
 public class RenderSystem extends IteratingSystem {
 
-    /**
-     * Visual scale multiplier for the car sprite. The PNG has padding around
-     * the car body, so the sprite must be drawn larger than the physics
-     * hitbox for the visible car to match the collision shape.
-     */
     private static final float SPRITE_SCALE = 2.0f;
+    private static final float TURN_SPRITE_ANGLE_ON = 6f;
+    private static final float TURN_SPRITE_ANGLE_OFF = 2.5f;
 
     private final SpriteBatch batch;
     private final Box2DDebugRenderer debugRenderer;
@@ -42,28 +38,39 @@ public class RenderSystem extends IteratingSystem {
     private boolean debugDraw = false;
 
     private final TextureRegion carStraightRegion;
-    private final TextureRegion carTurnRegion;
-    private final TextureRegion carTurnFlippedRegion;
+    private final TextureRegion carTurnLeftRegion;
+    private final TextureRegion carTurnRightRegion;
+
+    private final SpriteAnchorUtil.Anchor straightAnchor;
+    private final SpriteAnchorUtil.Anchor turnLeftAnchor;
+    private final SpriteAnchorUtil.Anchor turnRightAnchor;
+
+    private final Vector2 anchorCorrection = new Vector2();
+    private final Vector2 drawPos = new Vector2();
 
     private final ComponentMapper<PhysicsComponent> physicsMapper =
             ComponentMapper.getFor(PhysicsComponent.class);
     private final ComponentMapper<CarComponent> carMapper =
             ComponentMapper.getFor(CarComponent.class);
-    private final ComponentMapper<InputComponent> inputMapper =
-            ComponentMapper.getFor(InputComponent.class);
 
     public RenderSystem(OrthographicCamera camera, World world, PhysicsSystem physicsSystem,
-                        Texture carStraight, Texture carTurn) {
+                        Texture carStraight, SpriteAnchorUtil.Anchor straightAnchor,
+                        Texture carTurnLeft, SpriteAnchorUtil.Anchor turnLeftAnchor,
+                        Texture carTurnRight, SpriteAnchorUtil.Anchor turnRightAnchor) {
         super(Family.all(PhysicsComponent.class).get());
         this.camera = camera;
         this.world = world;
         this.physicsSystem = physicsSystem;
         this.batch = new SpriteBatch();
         this.debugRenderer = new Box2DDebugRenderer();
+
+        this.straightAnchor = straightAnchor != null ? straightAnchor : new SpriteAnchorUtil.Anchor(0f, 0f);
+        this.turnLeftAnchor = turnLeftAnchor != null ? turnLeftAnchor : this.straightAnchor;
+        this.turnRightAnchor = turnRightAnchor != null ? turnRightAnchor : this.straightAnchor;
+
         this.carStraightRegion = new TextureRegion(carStraight);
-        this.carTurnRegion = new TextureRegion(carTurn);
-        this.carTurnFlippedRegion = new TextureRegion(carTurn);
-        this.carTurnFlippedRegion.flip(false, true);
+        this.carTurnLeftRegion = new TextureRegion(carTurnLeft);
+        this.carTurnRightRegion = new TextureRegion(carTurnRight);
     }
 
     @Override
@@ -82,12 +89,11 @@ public class RenderSystem extends IteratingSystem {
     protected void processEntity(Entity entity, float deltaTime) {
         PhysicsComponent physics = physicsMapper.get(entity);
         Body body = physics.body;
-
         if (body == null) return;
 
         float alpha = physicsSystem != null ? physicsSystem.getInterpolationAlpha() : 1f;
 
-        Vector2 pos = new Vector2(physics.prevPosition).lerp(body.getPosition(), alpha);
+        drawPos.set(physics.prevPosition).lerp(body.getPosition(), alpha);
 
         float currentAngle = body.getAngle();
         float prevAngle = physics.prevAngle;
@@ -97,29 +103,78 @@ public class RenderSystem extends IteratingSystem {
         else if (diff < -MathUtils.PI) diff += MathUtils.PI2;
         float angle = prevAngle + diff * alpha;
 
-        InputComponent input = inputMapper.has(entity) ? inputMapper.get(entity) : null;
-        float steer = input != null ? input.steering : 0f;
+        CarComponent car = carMapper.has(entity) ? carMapper.get(entity) : null;
+        int steerSprite = updateSteerSpriteState(car);
 
         TextureRegion region;
+        SpriteAnchorUtil.Anchor spriteAnchor = straightAnchor;
 
-        if (steer < -0.01f) {
-            region = carTurnRegion;
-        } else if (steer > 0.01f) {
-            region = carTurnFlippedRegion;
+        if (steerSprite < 0) {
+            region = carTurnRightRegion;
+            spriteAnchor = turnRightAnchor;
+        } else if (steerSprite > 0) {
+            region = carTurnLeftRegion;
+            spriteAnchor = turnLeftAnchor;
         } else {
             region = carStraightRegion;
         }
 
         float spriteW = physics.heightMeters * SPRITE_SCALE;
         float spriteH = physics.widthMeters * SPRITE_SCALE;
-
-        float drawX = pos.x - spriteW / 2f;
-        float drawY = pos.y - spriteH / 2f;
-        float originX = spriteW / 2f;
-        float originY = spriteH / 2f;
         float rotation = angle * MathUtils.radiansToDegrees + 90f;
 
+        applyAnchorCorrection(straightAnchor, spriteAnchor, spriteW, spriteH, rotation, anchorCorrection);
+
+        float originX = spriteW / 2f;
+        float originY = spriteH / 2f;
+        float drawX = drawPos.x - originX + anchorCorrection.x;
+        float drawY = drawPos.y - originY + anchorCorrection.y;
+
         batch.draw(region, drawX, drawY, originX, originY, spriteW, spriteH, 1f, 1f, rotation);
+    }
+
+    private static int updateSteerSpriteState(CarComponent car) {
+        if (car == null) return 0;
+
+        float steerAngle = car.currentSteeringAngle;
+        if (car.steerSpriteState == 0) {
+            if (steerAngle <= -TURN_SPRITE_ANGLE_ON) {
+                car.steerSpriteState = -1;
+            } else if (steerAngle >= TURN_SPRITE_ANGLE_ON) {
+                car.steerSpriteState = 1;
+            }
+        } else if (car.steerSpriteState < 0) {
+            if (steerAngle > -TURN_SPRITE_ANGLE_OFF) {
+                car.steerSpriteState = 0;
+            }
+        } else if (car.steerSpriteState > 0 && steerAngle < TURN_SPRITE_ANGLE_OFF) {
+            car.steerSpriteState = 0;
+        }
+
+        return car.steerSpriteState;
+    }
+
+    /**
+     * Shifts the draw position so {@code spriteAnchor} lines up with {@code referenceAnchor}
+     * at the physics body position.
+     */
+    private static void applyAnchorCorrection(SpriteAnchorUtil.Anchor referenceAnchor,
+                                              SpriteAnchorUtil.Anchor spriteAnchor,
+                                              float spriteW, float spriteH, float rotationDeg,
+                                              Vector2 out) {
+        float du = referenceAnchor.offsetU - spriteAnchor.offsetU;
+        float dv = referenceAnchor.offsetV - spriteAnchor.offsetV;
+        if (Math.abs(du) < 0.00001f && Math.abs(dv) < 0.00001f) {
+            out.setZero();
+            return;
+        }
+        float localX = du * spriteW;
+        float localY = dv * spriteH;
+        float rad = rotationDeg * MathUtils.degreesToRadians;
+        float cos = MathUtils.cos(rad);
+        float sin = MathUtils.sin(rad);
+        out.x = localX * cos - localY * sin;
+        out.y = localX * sin + localY * cos;
     }
 
     public void toggleDebugDraw() {

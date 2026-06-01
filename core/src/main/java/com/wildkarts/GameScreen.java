@@ -64,6 +64,7 @@ import com.wildkarts.systems.TerrainSystem;
 import com.wildkarts.track.TrackData;
 import com.wildkarts.track.TrackGenerator;
 import com.wildkarts.track.TrackRenderer;
+import com.wildkarts.util.SpriteAnchorUtil;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -169,18 +170,21 @@ public class GameScreen extends ScreenAdapter {
     /** Pixels-per-meter ratio for camera. */
     private static final float VIEWPORT_WIDTH_METERS = 40f;
 
-    private static final String MAP_FILE = "custom_map.json";
-
     // ─── Asset Paths ────────────────────────────────────────────────────
     private static final String ASSETS_PATH        = "sprites/";
     private static final String TEXTURES_PATH      = "textures/";
     private static final String CAR_STRAIGHT_FILE  = ASSETS_PATH + "car_straight.png";
-    private static final String CAR_TURN_FILE      = ASSETS_PATH + "car_turn.png";
+    private static final String CAR_TURN_LEFT_FILE  = ASSETS_PATH + "car_turn_left.png";
+    private static final String CAR_TURN_RIGHT_FILE = ASSETS_PATH + "car_turn_right.png";
     private static final String GRASS_TEXTURE_FILE = TEXTURES_PATH + "grass.png";
 
     // Loaded textures (managed by loadAllAssets / dispose)
     private Texture carStraightTexture;
-    private Texture carTurnTexture;
+    private Texture carTurnLeftTexture;
+    private Texture carTurnRightTexture;
+    private SpriteAnchorUtil.Anchor carStraightAnchor;
+    private SpriteAnchorUtil.Anchor carTurnLeftAnchor;
+    private SpriteAnchorUtil.Anchor carTurnRightAnchor;
     private Texture grassTexture;
 
     @Override
@@ -201,11 +205,7 @@ public class GameScreen extends ScreenAdapter {
         trackGenerator = new TrackGenerator();
         trackRenderer = new TrackRenderer(grassTexture);
 
-        // In multiplayer, load the default map. In Map Editor, start clean.
-        // Track generation handled via network in multiplayer
-        if (!isMultiplayerMode) {
-            trackGenerator.loadMap(MAP_FILE);
-        }
+        // Map editor starts empty — use LOAD to open a saved map, click to add points.
 
         // --- Ashley ECS engine ---
         engine = new Engine();
@@ -235,7 +235,10 @@ public class GameScreen extends ScreenAdapter {
         skidmarkSystem = new SkidmarkSystem(camera);
         skidmarkSystem.priority = 4;
 
-        renderSystem = new RenderSystem(camera, world, physicsSystem, carStraightTexture, carTurnTexture);
+        renderSystem = new RenderSystem(camera, world, physicsSystem,
+                carStraightTexture, carStraightAnchor,
+                carTurnLeftTexture, carTurnLeftAnchor,
+                carTurnRightTexture, carTurnRightAnchor);
         renderSystem.priority = 5;
 
         carDebugRenderSystem = new CarDebugRenderSystem(camera);
@@ -356,6 +359,12 @@ public class GameScreen extends ScreenAdapter {
             // --- Create boundary walls ---
             createBoundaryWalls();
         }
+
+        if (isMultiplayerMode) {
+            ScreenMusic.playTheme(ScreenMusic.RACE_THEME_PATH);
+        } else {
+            ScreenMusic.stop();
+        }
     }
 
     // ─── Asset Loading ────────────────────────────────────────────────
@@ -367,20 +376,41 @@ public class GameScreen extends ScreenAdapter {
      * game can still run without the actual art assets.
      */
     private void loadAllAssets() {
+        FileHandle straightFile = Gdx.files.internal(CAR_STRAIGHT_FILE);
         carStraightTexture = loadTextureOrPlaceholder(CAR_STRAIGHT_FILE,
                 32, 64, new Color(0.2f, 0.6f, 1.0f, 1f));
-        carTurnTexture = loadTextureOrPlaceholder(CAR_TURN_FILE,
+        carStraightAnchor = SpriteAnchorUtil.fromFile(straightFile);
+
+        FileHandle turnLeftFile = Gdx.files.internal(CAR_TURN_LEFT_FILE);
+        if (!turnLeftFile.exists()) {
+            Gdx.app.log("Assets", "Missing " + CAR_TURN_LEFT_FILE + " — using straight sprite until you add the file.");
+            turnLeftFile = straightFile;
+        }
+        carTurnLeftTexture = loadTextureOrPlaceholder(turnLeftFile.path(),
+                32, 64, new Color(0.2f, 0.6f, 1.0f, 1f));
+        carTurnLeftAnchor = SpriteAnchorUtil.fromFile(turnLeftFile);
+
+        FileHandle turnRightFile = Gdx.files.internal(CAR_TURN_RIGHT_FILE);
+        if (!turnRightFile.exists()) {
+            Gdx.app.log("Assets", "Missing " + CAR_TURN_RIGHT_FILE + " — using straight sprite until you add the file.");
+            turnRightFile = straightFile;
+        }
+        carTurnRightTexture = loadTextureOrPlaceholder(turnRightFile.path(),
                 32, 64, new Color(0.2f, 0.5f, 0.9f, 1f));
+        carTurnRightAnchor = SpriteAnchorUtil.fromFile(turnRightFile);
+
         grassTexture = loadTextureOrPlaceholder(GRASS_TEXTURE_FILE,
                 256, 256, new Color(0.18f, 0.45f, 0.15f, 1f));
 
         carStraightTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
-        carTurnTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        carTurnLeftTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        carTurnRightTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         grassTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         grassTexture.setWrap(TextureWrap.Repeat, TextureWrap.Repeat);
 
-        Gdx.app.log("Assets", "All assets loaded — car_straight: " + CAR_STRAIGHT_FILE
-                + ", car_turn: " + CAR_TURN_FILE + ", grass: " + GRASS_TEXTURE_FILE);
+        Gdx.app.log("Assets", "Car sprites — straight: " + CAR_STRAIGHT_FILE
+                + ", turn left: " + turnLeftFile.path()
+                + ", turn right: " + turnRightFile.path());
     }
 
     /**
@@ -510,7 +540,7 @@ public class GameScreen extends ScreenAdapter {
         playerCar.add(terrain);
         playerCar.add(new LapComponent());
 
-        // Spin up race manager: WAITING_FOR_PLAYERS until the player presses Ready.
+        // Spin up race manager in PRACTICE so sector/lap times work solo before READY.
         startRaceLobby();
 
         // Reset Ready UI for a fresh race
@@ -523,10 +553,8 @@ public class GameScreen extends ScreenAdapter {
     }
 
     /**
-     * Creates the race manager entity in WAITING_FOR_PLAYERS state.
-     * Configures it with track-derived data (total control points, max laps,
-     * required players). Transition to COUNTDOWN happens automatically in
-     * {@code RaceStateSystem} once {@code readyPlayers >= requiredPlayers}.
+     * Creates the race manager entity in PRACTICE state.
+     * Sector and lap timing work immediately; READY starts the countdown.
      */
     private void startRaceLobby() {
         if (raceEntity != null) {
@@ -534,7 +562,7 @@ public class GameScreen extends ScreenAdapter {
         }
         raceEntity = new Entity();
         RaceComponent race = new RaceComponent();
-        race.currentState = isMultiplayerMode ? RaceState.PRACTICE : RaceState.WAITING_FOR_PLAYERS;
+        race.currentState = RaceState.PRACTICE;
         race.countdownTimer = 3.0f;
         race.raceTimer = 0.0f;
         race.maxLaps = 3;
@@ -623,6 +651,15 @@ public class GameScreen extends ScreenAdapter {
                 lap.currentSectorElapsed = 0f;
             }
 
+            if (packet.lastLapTime > 0f) {
+                lap.lastPracticeLapTime = packet.lastLapTime;
+                // New practice lap — clear sector sum so the lap clock restarts at 00:00.00.
+                lap.resetCurrentLapTiming();
+            }
+            if (packet.bestPracticeLapTime > 0f) {
+                lap.bestPracticeLapTime = packet.bestPracticeLapTime;
+            }
+
             RaceComponent race = getRaceComponent();
             if (race != null && packet.raceTimerSnapshot > 0f) {
                 race.raceTimer = packet.raceTimerSnapshot;
@@ -662,10 +699,7 @@ public class GameScreen extends ScreenAdapter {
 
                 LapComponent lap = carEntity.getComponent(LapComponent.class);
                 if (lap != null) {
-                    lap.currentLap = 1;
-                    lap.nextTrackPointIndex = 1;
-                    lap.currentSector = 0;
-                    lap.currentSectorElapsed = 0f;
+                    lap.resetForNextPracticeLap();
                     lap.finished = false;
                     lap.lastRequestedPointIndex = -1;
                 }
@@ -868,7 +902,16 @@ public class GameScreen extends ScreenAdapter {
         table.add(nameField).colspan(4).fillX().padBottom(5).row();
         table.add(saveButton).colspan(2).fillX().padRight(5).height(35f);
         table.add(loadButton).colspan(2).fillX().height(35f).row();
-        table.add(scrollPane).colspan(4).fillX().height(150f).padTop(10);
+        table.add(scrollPane).colspan(4).fillX().height(150f).padTop(10).padBottom(10).row();
+
+        TextButton editorExitButton = new TextButton("EXIT TO MENU", uiSkin);
+        editorExitButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                exitToMainMenu();
+            }
+        });
+        table.add(editorExitButton).colspan(4).fillX().height(35f);
 
         editorStage.addActor(table);
     }
@@ -933,13 +976,13 @@ public class GameScreen extends ScreenAdapter {
     private void showRaceResults(int[] playerIds, String[] playerNames, float[] finishTimes) {
         resultsPanel.clear();
 
-        Label title = new Label("WYNIKI WYSCIGU", uiSkin);
+        Label title = new Label("RACE RESULTS", uiSkin);
         title.setFontScale(2f);
         title.setAlignment(Align.center);
         resultsPanel.add(title).padBottom(35f).expandX().center().colspan(3).row();
 
         for (int i = 0; i < playerIds.length; i++) {
-            String place = (i + 1) + ". Miejsce";
+            String place = (i + 1) + ". Place";
             String name = playerNames[i] != null ? playerNames[i] : "Player";
             String time = finishTimes[i] > 0f ? formatRaceTime(finishTimes[i]) : "DNF";
 
@@ -959,7 +1002,7 @@ public class GameScreen extends ScreenAdapter {
             resultsPanel.row();
         }
 
-        TextButton returnButton = new TextButton("Wyjdz do menu", uiSkin);
+        TextButton returnButton = new TextButton("Exit to Menu", uiSkin);
         returnButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -992,7 +1035,7 @@ public class GameScreen extends ScreenAdapter {
         title.setFontScale(1.8f);
         title.setAlignment(Align.center);
 
-        TextButton resumeButton = new TextButton("Wznow", uiSkin);
+        TextButton resumeButton = new TextButton("Resume", uiSkin);
         resumeButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -1000,7 +1043,7 @@ public class GameScreen extends ScreenAdapter {
             }
         });
 
-        TextButton exitButton = new TextButton("Wyjdz do menu", uiSkin);
+        TextButton exitButton = new TextButton("Exit to Menu", uiSkin);
         exitButton.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -1039,7 +1082,9 @@ public class GameScreen extends ScreenAdapter {
     private void exitToMainMenu() {
         isEscapeMenuOpen = false;
         isResultsScreenOpen = false;
-        inputSystem.externalInputBlocked = false;
+        if (inputSystem != null) {
+            inputSystem.externalInputBlocked = false;
+        }
 
         if (gameClient != null) {
             gameClient.dispose();
@@ -1081,8 +1126,16 @@ public class GameScreen extends ScreenAdapter {
         table.setFillParent(true);
         table.center();
         table.add(loadingLabel).pad(20).row();
+
+        TextButton loadingExitButton = new TextButton("EXIT TO MENU", uiSkin);
+        loadingExitButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                exitToMainMenu();
+            }
+        });
+        table.add(loadingExitButton).width(220f).height(50f).padTop(30f);
         
-        // Add a progress-like indicator or just a pulse effect could be added later
         loadingStage.addActor(table);
     }
 
@@ -1304,7 +1357,8 @@ public class GameScreen extends ScreenAdapter {
         if (uiFont != null) uiFont.dispose();
 
         if (carStraightTexture != null) carStraightTexture.dispose();
-        if (carTurnTexture != null) carTurnTexture.dispose();
+        if (carTurnLeftTexture != null) carTurnLeftTexture.dispose();
+        if (carTurnRightTexture != null) carTurnRightTexture.dispose();
         if (grassTexture != null) grassTexture.dispose();
     }
 }

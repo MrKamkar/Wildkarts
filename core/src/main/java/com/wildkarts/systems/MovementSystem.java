@@ -86,6 +86,7 @@ public class MovementSystem extends IteratingSystem {
         boolean reversing = forwardSpeed < -0.5f;
         float rearGripMult = input.braking ? car.handbrakeRearGripMultiplier : 1f;
         float reverseGripMult = reversing ? 0.9f : 1f;
+        float rearExtraGrip = reverseGripMult * rearGripMult;
 
         LOCAL_FRONT_AXLE.set(0f, car.frontAxleDistance);
         LOCAL_REAR_AXLE.set(0f, -car.rearAxleDistance);
@@ -103,6 +104,9 @@ public class MovementSystem extends IteratingSystem {
         float gripScale = computeGripScale(chassisSpeed, car);
 
         float steerInputAbs = Math.abs(input.steering);
+        if (input.throttle > 0.15f && steerInputAbs > 0.08f) {
+            rearExtraGrip *= car.powerOversteerGripMultiplier;
+        }
         boolean isTurning = steerInputAbs > 0.01f;
         boolean isHandbrake = input.braking;
         boolean straightMode = !isTurning && !isHandbrake;
@@ -136,7 +140,7 @@ public class MovementSystem extends IteratingSystem {
         float fyFront = evaluateAxleForce(car, frontCfg, car.frontTireRuntime, alphaFrontRaw, alphaFront,
                 car.frontNormalLoadN, refLoad, gripScale, forceScale, car.surfaceMu, reverseGripMult, 1f);
         float fyRear = evaluateAxleForce(car, rearCfg, car.rearTireRuntime, alphaRearRaw, alphaRear,
-                car.rearNormalLoadN, refLoad, gripScale, forceScale, car.surfaceMu, reverseGripMult, rearGripMult);
+                car.rearNormalLoadN, refLoad, gripScale, forceScale, car.surfaceMu, rearExtraGrip, 1f);
 
         car.frontLateralForce = fyFront;
         car.rearLateralForce = fyRear;
@@ -165,6 +169,10 @@ public class MovementSystem extends IteratingSystem {
         }
 
         float latDamp = straightMode ? car.stabilityLateralDamping : car.turningLateralDamping;
+        // On throttle in a corner, lateral damping scrubs total speed — keep only light cleanup.
+        if (isTurning && input.throttle > 0.12f) {
+            latDamp *= 0.35f;
+        }
         if (reversing) latDamp *= 1.5f;
         force.set(lateralDir).scl(-lateralSpeed * latDamp * forceScale);
         body.applyForceToCenter(force, true);
@@ -214,7 +222,10 @@ public class MovementSystem extends IteratingSystem {
             denom = car.minLongitudinalSpeedForSlip;
         }
 
-        float alpha = MathUtils.atan2(vLatWheel, Math.copySign(denom, vLongWheel == 0f ? 1f : vLongWheel));
+        // Use a positive longitudinal magnitude so straight reverse reads ~0 slip
+        // (not ~180 degrees). This keeps forward driving identical while
+        // preventing false skidmarks/lateral force when backing up.
+        float alpha = MathUtils.atan2(vLatWheel, denom);
 
         float fade = MathUtils.clamp(chassisSpeed / Math.max(car.lowSpeedGripFadeSpeed, 0.1f), 0f, 1f);
         return alpha * fade;
@@ -256,7 +267,7 @@ public class MovementSystem extends IteratingSystem {
 
     /**
      * Simcade recovery assist: torque pulls chassis heading toward velocity heading whenever the
-     * driver is "asking the car to recover" — no throttle, no steer, OR active counter-steer.
+     * driver is coasting straight, easing off throttle, or actively counter-steering.
      * Counter-steer also gets a yaw-rate damper, so a correct kontra both rotates the wheel fast
      * (see updateSteering) and bleeds off the remaining spin.
      */
@@ -267,10 +278,10 @@ public class MovementSystem extends IteratingSystem {
 
         boolean noSteer = Math.abs(input.steering) < 0.01f;
         boolean counterSteer = Math.abs(forwardSpeed) > 0.5f && isCounterSteering(input.steering, omega, car);
-        boolean noThrottle = Math.abs(input.throttle) < 0.05f;
 
-        // Driver still pushing hard into the slide (steer + throttle, no kontra) → leave them alone.
-        if (!noSteer && !counterSteer && !noThrottle) return;
+        // Active steering (except counter-steer recovery) — don't pull heading toward velocity;
+        // that scrubs corner speed and feels like the car hits an invisible brake in turns.
+        if (!noSteer && !counterSteer) return;
 
         float beta = MathUtils.atan2(lateralSpeed, Math.max(Math.abs(forwardSpeed), 1.5f));
         float speedWeight = MathUtils.clamp(
@@ -279,9 +290,6 @@ public class MovementSystem extends IteratingSystem {
         float strength = car.alignmentAssistStrength;
         if (counterSteer) {
             strength *= car.counterSteerAlignmentBoost;
-        } else if (!noSteer) {
-            // Throttle off but still steering — light help only, don't fight the driver.
-            strength *= 0.5f;
         }
 
         body.applyTorque(-beta * strength * speedWeight * forceScale, true);

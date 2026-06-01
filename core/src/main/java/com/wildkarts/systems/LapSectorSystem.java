@@ -41,9 +41,6 @@ import java.util.List;
  */
 public class LapSectorSystem extends EntitySystem {
 
-    /** Radius (meters) within which the car is considered to have reached a point. */
-    private static final float DEFAULT_POINT_RADIUS = 4f;
-
     private final ComponentMapper<LapComponent> lapMapper =
             ComponentMapper.getFor(LapComponent.class);
     private final ComponentMapper<PhysicsComponent> physicsMapper =
@@ -110,11 +107,8 @@ public class LapSectorSystem extends EntitySystem {
         int totalPoints = points.size;
         if (totalPoints < 3) return;
 
-        float radius = computePointRadius();
-        float radiusSq = radius * radius;
-
         for (Entity racer : racers) {
-            updateRacer(racer, race, points, totalPoints, radiusSq, deltaTime);
+            updateRacer(racer, race, points, totalPoints, deltaTime);
         }
 
         // Server is authoritative on positions in multiplayer — skip local sort.
@@ -126,7 +120,7 @@ public class LapSectorSystem extends EntitySystem {
     // ─── Per-racer Update ────────────────────────────────────────────────
 
     private void updateRacer(Entity racer, RaceComponent race, Array<Vector2> points,
-                             int totalPoints, float radiusSq, float deltaTime) {
+                             int totalPoints, float deltaTime) {
         LapComponent lap = lapMapper.get(racer);
         if (lap.finished) return;
 
@@ -148,7 +142,7 @@ public class LapSectorSystem extends EntitySystem {
         float distSq = dx * dx + dy * dy;
         lap.distanceToNextPointSq = distSq;
 
-        if (distSq > radiusSq) return;
+        if (!trackGenerator.isWithinCheckpointGate(targetIdx, carPos.x, carPos.y)) return;
 
         if (race.serverAuthoritative) {
             // Forward to server (debounced — one request per point).
@@ -158,11 +152,49 @@ public class LapSectorSystem extends EntitySystem {
                         gameClient.localPlayerId, targetIdx, carPos.x, carPos.y));
             }
         } else {
-            advancePoint(lap, race, targetIdx, totalPoints);
+            if (race.currentState == RaceState.PRACTICE) {
+                advancePointPractice(lap, race, targetIdx, totalPoints);
+            } else {
+                advancePoint(lap, race, targetIdx, totalPoints);
+            }
         }
     }
 
     // ─── Point / Sector / Lap Advancement ────────────────────────────────
+
+    private void advancePointPractice(LapComponent lap, RaceComponent race, int passedIdx, int totalPoints) {
+        lap.nextTrackPointIndex = (passedIdx + 1) % totalPoints;
+
+        int completedSectorIdx = sectorEndingAt(passedIdx, totalPoints, race.totalSectors);
+
+        if (passedIdx == 0) {
+            if (completedSectorIdx >= 0) {
+                recordSectorTime(lap, completedSectorIdx);
+            }
+
+            float lapTime = 0f;
+            for (float t : lap.currentLapSectorTimes) {
+                lapTime += t;
+            }
+            if (lapTime > 0f) {
+                lap.lastPracticeLapTime = lapTime;
+                if (lap.bestPracticeLapTime <= 0f || lapTime < lap.bestPracticeLapTime) {
+                    lap.bestPracticeLapTime = lapTime;
+                }
+                Gdx.app.log("Race", String.format(
+                        "Practice lap: %.2fs (best %.2fs)", lapTime, lap.bestPracticeLapTime));
+            }
+
+            resetForNextPracticeLap(lap);
+            race.raceTimer = 0f;
+        } else if (completedSectorIdx >= 0) {
+            recordSectorTime(lap, completedSectorIdx);
+        }
+    }
+
+    private static void resetForNextPracticeLap(LapComponent lap) {
+        lap.resetForNextPracticeLap();
+    }
 
     private void advancePoint(LapComponent lap, RaceComponent race, int passedIdx, int totalPoints) {
         // The racer just reached point `passedIdx`. Move target to the next one.
@@ -253,13 +285,6 @@ public class LapSectorSystem extends EntitySystem {
     }
 
     // ─── Utilities ───────────────────────────────────────────────────────
-
-    /** Scale the detection radius with the track's half-width to support custom maps. */
-    private float computePointRadius() {
-        float half = trackGenerator.getTrackHalfWidth();
-        if (half <= 0f) return DEFAULT_POINT_RADIUS;
-        return Math.max(DEFAULT_POINT_RADIUS, half * 0.9f);
-    }
 
     private RaceComponent getRaceComponent() {
         if (raceEntities == null || raceEntities.size() == 0) return null;

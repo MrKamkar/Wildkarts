@@ -1,5 +1,7 @@
 apply plugin: 'application'
 
+sourceSets.main.resources.srcDirs = ['assets/']
+
 dependencies {
     implementation project(':core')
     implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"

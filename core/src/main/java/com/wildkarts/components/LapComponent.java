@@ -49,6 +49,27 @@ public class LapComponent implements Component {
      */
     public float lastSectorDelta = 0f;
 
+    /** Personal best full-lap time during solo / practice (0 = none yet). */
+    public float bestPracticeLapTime = 0f;
+
+    /** Most recently completed practice lap time (seconds). */
+    public float lastPracticeLapTime = 0f;
+
+    /** Resets sector/lap progress for a new timed lap (keeps personal bests). */
+    public void resetCurrentLapTiming() {
+        currentSector = 0;
+        currentSectorElapsed = 0f;
+        java.util.Arrays.fill(currentLapSectorTimes, 0f);
+        lastSectorDelta = 0f;
+    }
+
+    /** After a practice lap — restart checkpoint/sector progress from the line. */
+    public void resetForNextPracticeLap() {
+        currentLap = 1;
+        nextTrackPointIndex = 1;
+        resetCurrentLapTiming();
+    }
+
     // ─── Race Position ────────────────────────────────────────────────
 
     /** Current race position assigned by {@code LapSectorSystem} (1 = leader). */

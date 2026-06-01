@@ -38,6 +38,7 @@ public class TrackRenderer {
     private static final Color CONTROL_POINT_COLOR = new Color(1f, 0.4f, 0.2f, 1f);
     private static final Color SPLINE_COLOR = new Color(1f, 1f, 0.3f, 0.8f);
     private static final Color POINT_INDEX_COLOR = new Color(1f, 1f, 1f, 0.6f);
+    private static final Color CHECKPOINT_GATE_COLOR = new Color(1f, 0.95f, 0.2f, 0.55f);
 
     // Finish line colors
     private static final Color FINISH_BLACK = new Color(0.1f, 0.1f, 0.1f, 1f);
@@ -76,6 +77,7 @@ public class TrackRenderer {
         renderGridBoundary(track);
         renderControlPoints(track);
         renderSpline(track);
+        renderCheckpointGates(track);
     }
 
     // ─── Tile Grid ─────────────────────────────────────────────────────
@@ -285,6 +287,31 @@ public class TrackRenderer {
             }
             shapeRenderer.end();
         }
+    }
+
+    /**
+     * Draws full-width checkpoint gate lines at every control point so the
+     * editor shows the same detection geometry used during racing.
+     */
+    private void renderCheckpointGates(TrackGenerator track) {
+        Array<Vector2> points = track.getManualPoints();
+        if (points.size < 3) return;
+
+        float halfWidth = track.getTrackHalfWidth();
+        Vector2 center = new Vector2();
+        Vector2 normal = new Vector2();
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+        shapeRenderer.setColor(CHECKPOINT_GATE_COLOR);
+        for (int i = 0; i < points.size; i++) {
+            track.getCheckpointGateFrame(i, center, normal);
+            float x1 = center.x - normal.x * halfWidth;
+            float y1 = center.y - normal.y * halfWidth;
+            float x2 = center.x + normal.x * halfWidth;
+            float y2 = center.y + normal.y * halfWidth;
+            shapeRenderer.line(x1, y1, x2, y2);
+        }
+        shapeRenderer.end();
     }
 
     // ─── Spline Curve ──────────────────────────────────────────────────

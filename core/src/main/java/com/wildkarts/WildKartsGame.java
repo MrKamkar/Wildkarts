@@ -36,6 +36,7 @@ public class WildKartsGame extends Game {
 
     @Override
     public void dispose() {
+        ScreenMusic.stop();
         if (gameClient != null) {
             gameClient.dispose();
         }

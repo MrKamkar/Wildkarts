@@ -35,6 +35,12 @@ public class TrackGenerator {
     /** Half-width of the road in meters (total road width = 2 * this). */
     private float trackHalfWidth = 6f;
 
+    /** Extra lateral tolerance beyond road half-width for checkpoint gates (meters). */
+    public static final float GATE_LATERAL_MARGIN = 0.75f;
+
+    /** Depth along the road direction within which a car counts as crossing a gate (meters). */
+    public static final float GATE_DEPTH_ALONG_ROAD = 3.0f;
+
     /** Spline sampling step — smaller = more accurate rasterization. */
     private static final float SPLINE_STEP = 0.001f;
 
@@ -430,6 +436,58 @@ public class TrackGenerator {
     public Array<Vector2> getManualPoints() { return manualPoints; }
     public float getTrackHalfWidth() { return trackHalfWidth; }
     public Array<CurbSegment> getCurbs() { return curbs; }
+
+    /**
+     * Returns true when {@code (x, y)} is within the checkpoint gate at the given
+     * control point — a strip perpendicular to the track spanning the full road width.
+     */
+    public boolean isWithinCheckpointGate(int pointIndex, float x, float y) {
+        int n = manualPoints.size;
+        if (n < 3 || pointIndex < 0 || pointIndex >= n) return false;
+
+        Vector2 center = manualPoints.get(pointIndex);
+        Vector2 prev = manualPoints.get((pointIndex - 1 + n) % n);
+        Vector2 next = manualPoints.get((pointIndex + 1) % n);
+
+        float tx = next.x - prev.x;
+        float ty = next.y - prev.y;
+        float tLen = (float) Math.sqrt(tx * tx + ty * ty);
+        if (tLen < 0.001f) return false;
+        tx /= tLen;
+        ty /= tLen;
+
+        // Gate normal (perpendicular to road direction through this point)
+        float nx = -ty;
+        float ny = tx;
+
+        float relX = x - center.x;
+        float relY = y - center.y;
+        float lateral = relX * nx + relY * ny;
+        float along = relX * tx + relY * ty;
+
+        return Math.abs(lateral) <= trackHalfWidth + GATE_LATERAL_MARGIN
+                && Math.abs(along) <= GATE_DEPTH_ALONG_ROAD;
+    }
+
+    /** Gate center and unit normal for rendering or debug (normal points across track). */
+    public void getCheckpointGateFrame(int pointIndex, Vector2 centerOut, Vector2 normalOut) {
+        int n = manualPoints.size;
+        if (n < 3 || pointIndex < 0 || pointIndex >= n) return;
+
+        Vector2 center = manualPoints.get(pointIndex);
+        Vector2 prev = manualPoints.get((pointIndex - 1 + n) % n);
+        Vector2 next = manualPoints.get((pointIndex + 1) % n);
+
+        float tx = next.x - prev.x;
+        float ty = next.y - prev.y;
+        float tLen = (float) Math.sqrt(tx * tx + ty * ty);
+        if (tLen < 0.001f) return;
+        tx /= tLen;
+        ty /= tLen;
+
+        centerOut.set(center);
+        normalOut.set(-ty, tx);
+    }
 
     // ─── Data Sync ─────────────────────────────────────────────────────
 

@@ -18,7 +18,7 @@ public class CarComponent implements Component {
      * Master speed scale — multiply with physicsSpeedScale to fit map size.
      * Affects top speed limits, HUD speed, and soft speed cap via drag.
      */
-    public float globalSpeedMultiplier = 0.72f;
+    public float globalSpeedMultiplier = 1.10f;
 
     /** Fine-tune readout / limits (1 = raw Box2D m/s). */
     public float physicsSpeedScale = 1f;
@@ -32,35 +32,35 @@ public class CarComponent implements Component {
 
     // --- Chassis geometry (meters from CG, body-local +Y forward) ---
 
-    public float frontAxleDistance = 0.95f;
-    public float rearAxleDistance = 0.95f;
+    public float frontAxleDistance = 0.94f;
+    public float rearAxleDistance = 0.96f;
 
     /** Half-track for rear wheels (meters from centerline); 0 = use body width. */
     public float rearWheelHalfTrack = 0f;
 
     // --- Engine & speed limits (base values, scaled by globalSpeedMultiplier) ---
 
-    public float maxForwardSpeed = 38f;
-    public float maxBackwardSpeed = 16f;
+    public float maxForwardSpeed = 68f;
+    public float maxBackwardSpeed = 22f;
 
     /** Base engine force (N); also scaled by engineForceMultiplier. */
-    public float engineForce = 380f;
+    public float engineForce = 580f;
 
     /** 0.75 = 25% less acceleration. */
-    public float engineForceMultiplier = 0.75f;
+    public float engineForceMultiplier = 0.92f;
 
     public float brakeForce = 220f;
 
     // --- Aerodynamic & rolling resistance ---
 
-    public float aerodynamicDragCoeff = 0.005f;
+    public float aerodynamicDragCoeff = 0.0038f;
 
     /** Extra quadratic drag when speed exceeds this (m/s, after speed scaling). */
-    public float highSpeedDragStart = 18f;
+    public float highSpeedDragStart = 27f;
 
-    public float highSpeedDragCoeff = 0.018f;
+    public float highSpeedDragCoeff = 0.016f;
 
-    public float rollingResistance = 0.25f;
+    public float rollingResistance = 12f;
 
     // --- Steering (degrees) — simcade tuned: limited max + slow build so WSAD doesn't snap into oversteer ---
 
@@ -75,23 +75,23 @@ public class CarComponent implements Component {
 
     // --- Pacejka — front axle ---
 
-    public float pacejkaFrontB = 8.5f;
+    public float pacejkaFrontB = 8.56f;
     public float pacejkaFrontC = 1.3f;
-    /** Front peak grip. Slightly higher than rear = mild oversteer tendency. */
-    public float pacejkaFrontD = 240f;
-    public float pacejkaFrontE = -1.1f;
+    /** Front peak grip — slightly higher than rear for mild oversteer bias. */
+    public float pacejkaFrontD = 244f;
+    public float pacejkaFrontE = -1.09f;
 
     // --- Pacejka — rear axle ---
 
-    public float pacejkaRearB = 8f;
+    public float pacejkaRearB = 7.9f;
     public float pacejkaRearC = 1.3f;
-    /** Rear peak grip. Slightly lower than front = progressive oversteer under throttle + steering. */
-    public float pacejkaRearD = 230f;
-    public float pacejkaRearE = -1.3f;
+    /** Rear peak grip — below front = mild oversteer on throttle + steer. */
+    public float pacejkaRearD = 222f;
+    public float pacejkaRearE = -1.31f;
 
     /** Rear grip scale while the handbrake is held (drift trigger). */
     public float handbrakeRearGripMultiplier = 0.36f;
-    public float pacejkaMinSpeedForGrip = 2.5f;
+    public float pacejkaMinSpeedForGrip = 2.0f;
 
     /** Min |vLong| (m/s) in wheel frame for slip denominator. */
     public float minLongitudinalSpeedForSlip = 1.2f;
@@ -100,7 +100,7 @@ public class CarComponent implements Component {
     public float minChassisSpeedForSlip = 0.8f;
 
     /** Chassis speed (m/s) at which slip/grip reach full strength. */
-    public float lowSpeedGripFadeSpeed = 3.5f;
+    public float lowSpeedGripFadeSpeed = 3.0f;
 
     /** Yaw torque per rad steer (N·m) — only supplements Pacejka at low speed. */
     public float steeringYawTorqueGain = 16f;
@@ -126,11 +126,11 @@ public class CarComponent implements Component {
     // --- Off-road drag tuning — applied by TerrainSystem when not on road ---
 
     /** Engine force scale on grass (1 = road). Drops drive torque so wheels don't just spin. */
-    public float grassEngineMultiplier = 0.55f;
+    public float grassEngineMultiplier = 0.72f;
     /** Top speed scale on grass (1 = road). */
-    public float grassMaxSpeedMultiplier = 0.55f;
+    public float grassMaxSpeedMultiplier = 0.72f;
     /** Rolling resistance scale on grass. >1 = car bogs down smoothly off-road. */
-    public float grassRollingResistanceMultiplier = 60f;
+    public float grassRollingResistanceMultiplier = 2.5f;
     /** Extra aero-drag added on grass (N·s²/m²). Speed-squared term, helps cap top end naturally. */
     public float grassAeroDragBonus = 0.04f;
     /** Box2D linear damping scale on grass. Higher = car decelerates harder when off track. */
@@ -147,27 +147,30 @@ public class CarComponent implements Component {
     /**
      * Min falloff multiplier past peak — rear. Lower = more drift.
      */
-    public float slideForceFalloffMinRear = 0.72f;
+    public float slideForceFalloffMinRear = 0.69f;
 
     /** Min falloff past peak — front. */
-    public float slideForceFalloffMinFront = 0.84f;
+    public float slideForceFalloffMinFront = 0.848f;
 
-    /** Load transfer to front when turning. Higher = more weight on front = less rear grip in turns. */
-    public float turnLoadTransfer = 0.09f;
+    /** Load transfer to front when turning. Higher = rear unloads = oversteer. */
+    public float turnLoadTransfer = 0.104f;
 
-    /** Lateral damping while turning (always on). */
-    public float turningLateralDamping = 16f;
+    /** Lateral damping while turning — keep low; high values scrub corner speed. */
+    public float turningLateralDamping = 8f;
 
-    /** Extra torque opposing yaw when omega is very large (smooths out rotation). */
-    public float spinAngularDamping = 14f;
+    /** Extra torque opposing yaw when omega is very large (smooths out runaway spin only). */
+    public float spinAngularDamping = 13f;
     /** Omega (rad/s) at which spinAngularDamping reaches full strength. */
     public float spinDampingOmegaStart = 2.2f;
 
     /** Straight-line: cancels sideslip velocity (N per m/s lateral). */
     public float stabilityLateralDamping = 18f;
 
-    /** Engine scale when rear is sliding past peak slip (anti wheel-spin / fish-tail off-road). */
-    public float tractionControlStrength = 0.7f;
+    /** Engine scale when rear is sliding past peak slip (straight-line wheelspin only). */
+    public float tractionControlStrength = 0.73f;
+
+    /** Extra rear grip cut when throttle + steer (classic RWD power oversteer). */
+    public float powerOversteerGripMultiplier = 0.932f;
 
     // --- Simcade drift / counter-steer assists ---
 
@@ -181,15 +184,15 @@ public class CarComponent implements Component {
     /** Min chassis speed (m/s) before any alignment / counter-steer assist kicks in. */
     public float alignmentAssistMinSpeed = 2.5f;
     /** Base torque aligning chassis with velocity vector (N·m per rad sideslip). */
-    public float alignmentAssistStrength = 22f;
+    public float alignmentAssistStrength = 19.5f;
     /** Boost on alignmentAssistStrength while the driver is countering the current yaw. */
-    public float counterSteerAlignmentBoost = 1.8f;
+    public float counterSteerAlignmentBoost = 1.74f;
     /** Anti-yaw torque (N·m·s/rad) added when player is fully easing off or counter-steering. */
-    public float idleYawDamping = 18f;
+    public float idleYawDamping = 16.5f;
 
     // --- Box2D body damping (read by TerrainSystem and written to body each frame) ---
 
-    public float linearDamping = 0.1f;
+    public float linearDamping = 0.7f;
     public float angularDamping = 3.0f;
 
     // --- Skidmarks (rear wheels, past Pacejka peak grip) ---
@@ -222,6 +225,8 @@ public class CarComponent implements Component {
     // --- Runtime telemetry ---
 
     public float currentSteeringAngle = 0f;
+    /** Render hysteresis: -1 left turn sprite, 0 straight, +1 right turn sprite. */
+    public int steerSpriteState = 0;
     public float frontSlipAngle = 0f;
     public float rearSlipAngle = 0f;
     /** Slip used for Pacejka (clamped / stabilized). */

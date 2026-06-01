@@ -122,7 +122,9 @@ public class HudRenderSystem extends EntitySystem {
 
         if (race.currentState == RaceState.COUNTDOWN) {
             drawCountdown(race);
-        } else if (race.currentState == RaceState.RACING || race.currentState == RaceState.FINISHED) {
+        } else if (race.currentState == RaceState.RACING
+                || race.currentState == RaceState.FINISHED
+                || race.currentState == RaceState.PRACTICE) {
             if (goDisplayTimer > 0f) {
                 drawGoText();
             }
@@ -175,14 +177,26 @@ public class HudRenderSystem extends EntitySystem {
         font.draw(batch, posText, x, y);
         y -= lineHeight;
 
-        // Lap
-        int displayLap = Math.min(lap.currentLap, race.maxLaps);
-        String lapText = "Lap " + displayLap + " / " + race.maxLaps;
-        font.draw(batch, lapText, x, y);
-        y -= lineHeight;
+        // Lap / practice header
+        if (race.currentState == RaceState.PRACTICE) {
+            font.draw(batch, "Practice", x, y);
+            y -= lineHeight;
+            if (lap.bestPracticeLapTime > 0f) {
+                font.draw(batch, "Best " + formatTime(lap.bestPracticeLapTime), x, y);
+                y -= lineHeight;
+            }
+        } else {
+            int displayLap = Math.min(lap.currentLap, race.maxLaps);
+            String lapText = "Lap " + displayLap + " / " + race.maxLaps;
+            font.draw(batch, lapText, x, y);
+            y -= lineHeight;
+        }
 
-        // Race timer
-        String timerText = formatTime(race.raceTimer);
+        // Lap / race timer
+        float timerSeconds = race.currentState == RaceState.PRACTICE
+                ? currentLapElapsed(lap)
+                : race.raceTimer;
+        String timerText = formatTime(timerSeconds);
         font.draw(batch, timerText, x, y);
         y -= lineHeight;
 
@@ -216,6 +230,14 @@ public class HudRenderSystem extends EntitySystem {
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────
+
+    private float currentLapElapsed(LapComponent lap) {
+        float total = lap.currentSectorElapsed;
+        for (float sectorTime : lap.currentLapSectorTimes) {
+            total += sectorTime;
+        }
+        return total;
+    }
 
     private String formatTime(float totalSeconds) {
         if (totalSeconds < 0f) totalSeconds = 0f;

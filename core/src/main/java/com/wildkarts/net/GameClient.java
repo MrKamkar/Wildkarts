@@ -169,7 +169,7 @@ public class GameClient {
 
     public void connect(String ipAddress) {
         client.start();
-        new Thread(() -> {
+        Thread connectThread = new Thread(() -> {
             try {
                 // connect() blocks until TCP handshake is complete
                 client.connect(5000, ipAddress, Network.TCP_PORT, Network.UDP_PORT);
@@ -179,7 +179,9 @@ public class GameClient {
                     Gdx.app.postRunnable(onConnectionFailed);
                 }
             }
-        }).start();
+        });
+        connectThread.setDaemon(true);
+        connectThread.start();
     }
 
     public void sendReliable(ReliablePacket packet) {
