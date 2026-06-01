@@ -116,7 +116,6 @@ public class GameScreen extends ScreenAdapter implements GameScreenActions {
         } else {
             sessionController.transitionToLoading();
             networkCoordinator.registerCallbacks(() -> sessionController.transitionToPlaying());
-            sessionController.createBoundaryWalls();
         }
 
         if (ctx.isMultiplayerMode)

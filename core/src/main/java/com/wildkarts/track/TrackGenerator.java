@@ -20,9 +20,12 @@ import com.badlogic.gdx.utils.JsonWriter;
  *   <li>Siatkę można odpytywać w runtime o typ terenu pod dowolną pozycją</li>
  * </ol>
  *
- * <p>Mapy zapisywane/ładowane są jako tablice JSON współrzędnych punktów kontrolnych.</p>
+ * <p>Mapy zapisywane/ładowane są jako {@link TrackData} JSON (z fallbackiem na starszy format tablicy punktów).</p>
  */
 public class TrackGenerator {
+
+    /** Margines wokół toru przy auto-dopasowaniu siatki i ścian granicznych (m). */
+    private static final float GRID_FIT_PADDING = 10f;
 
     /** Kafelek trawy (poza drogą). */
     public static final int TILE_GRASS = 0;
@@ -89,16 +92,63 @@ public class TrackGenerator {
      * @param height nowa wysokość siatki
      */
     public void setGridSize(int width, int height) {
-        this.gridWidth = width;
-        this.gridHeight = height;
-        this.originX = -(gridWidth * TILE_SIZE) / 2f;
-        this.originY = -(gridHeight * TILE_SIZE) / 2f;
-        this.grid = new int[gridWidth][gridHeight];
+        resizeGrid(width, height);
         if (manualPoints.size >= 4) {
             rebuildSplineAndGrid();
         } else {
             clearGrid();
         }
+    }
+
+    /** Zmienia rozmiar siatki bez przebudowy toru. */
+    private void resizeGrid(int width, int height) {
+        this.gridWidth = width;
+        this.gridHeight = height;
+        this.originX = -(gridWidth * TILE_SIZE) / 2f;
+        this.originY = -(gridHeight * TILE_SIZE) / 2f;
+        this.grid = new int[gridWidth][gridHeight];
+    }
+
+    /**
+     * Dopasowuje siatkę terenu do bounding box punktów kontrolnych (wyśrodkowaną na 0,0).
+     * Wywoływane przed rasteryzacją drogi, aby duże mapy nie traktowały toru jako trawy.
+     */
+    private void fitGridToTrackBounds(float padding) {
+        if (manualPoints.size < 4) return;
+
+        float halfExtentX = 0f;
+        float halfExtentY = 0f;
+        for (Vector2 p : manualPoints) {
+            halfExtentX = Math.max(halfExtentX, Math.abs(p.x));
+            halfExtentY = Math.max(halfExtentY, Math.abs(p.y));
+        }
+        halfExtentX += trackHalfWidth + padding;
+        halfExtentY += trackHalfWidth + padding;
+
+        int neededWidth = Math.max(200, (int) Math.ceil(2f * halfExtentX / TILE_SIZE));
+        int neededHeight = Math.max(200, (int) Math.ceil(2f * halfExtentY / TILE_SIZE));
+
+        if (neededWidth != gridWidth || neededHeight != gridHeight) {
+            resizeGrid(neededWidth, neededHeight);
+            Gdx.app.log("TrackGenerator", "Grid auto-fitted to " + neededWidth + "x" + neededHeight);
+        }
+    }
+
+    /**
+     * Zwraca połowę boku kwadratu granicznego obejmującego tor (do ścian Box2D w multiplayerze).
+     */
+    public float getBoundaryHalfExtent() {
+        if (manualPoints.size < 4) return 50f;
+
+        float halfExtentX = 0f;
+        float halfExtentY = 0f;
+        for (Vector2 p : manualPoints) {
+            halfExtentX = Math.max(halfExtentX, Math.abs(p.x));
+            halfExtentY = Math.max(halfExtentY, Math.abs(p.y));
+        }
+        halfExtentX += trackHalfWidth + GRID_FIT_PADDING;
+        halfExtentY += trackHalfWidth + GRID_FIT_PADDING;
+        return Math.max(halfExtentX, halfExtentY);
     }
 
     /**
@@ -132,6 +182,7 @@ public class TrackGenerator {
 
     /** Przebudowuje zamkniętą spline i rasteryzuje drogę oraz krawężniki. */
     private void rebuildSplineAndGrid() {
+        fitGridToTrackBounds(GRID_FIT_PADDING);
         clearGrid();
 
         Vector2[] points = manualPoints.toArray(Vector2.class);
@@ -369,7 +420,7 @@ public class TrackGenerator {
     }
 
     /**
-     * Zapisuje punkty kontrolne do pliku JSON w katalogu lokalnym.
+     * Zapisuje pełne dane toru ({@link TrackData}) do pliku JSON w katalogu lokalnym.
      *
      * @param fileName nazwa pliku (ścieżka względem {@code Gdx.files.local})
      */
@@ -377,12 +428,13 @@ public class TrackGenerator {
         Json json = new Json();
         json.setOutputType(JsonWriter.OutputType.json);
         FileHandle file = Gdx.files.local(fileName);
-        file.writeString(json.prettyPrint(manualPoints), false);
-        Gdx.app.log("TrackGenerator", "Map saved to: " + file.path() + " (" + manualPoints.size + " points)");
+        file.writeString(json.prettyPrint(exportData()), false);
+        Gdx.app.log("TrackGenerator", "Map saved to: " + file.path() + " (" + manualPoints.size
+                + " points, grid " + gridWidth + "x" + gridHeight + ")");
     }
 
     /**
-     * Ładuje punkty kontrolne z pliku JSON i przebudowuje tor.
+     * Ładuje tor z pliku JSON ({@link TrackData} lub starszy format tablicy punktów) i przebudowuje siatkę.
      *
      * @param fileName nazwa pliku
      * @return {@code true} gdy wczytanie się powiodło, {@code false} gdy brak pliku
@@ -396,16 +448,34 @@ public class TrackGenerator {
         }
 
         Json json = new Json();
-        Array<Vector2> loaded = json.fromJson(Array.class, Vector2.class, file);
+        String content = file.readString().trim();
 
-        manualPoints.clear();
-        manualPoints.addAll(loaded);
-
-        if (manualPoints.size >= 4) {
-            rebuildSplineAndGrid();
+        if (content.startsWith("[")) {
+            Array<Vector2> loaded = json.fromJson(Array.class, Vector2.class, content);
+            manualPoints.clear();
+            manualPoints.addAll(loaded);
+            if (manualPoints.size >= 4) {
+                rebuildSplineAndGrid();
+            }
+        } else {
+            TrackData data = json.fromJson(TrackData.class, content);
+            if (data.points == null || data.points.size == 0) {
+                Gdx.app.log("TrackGenerator", "Invalid map file (no points): " + fileName);
+                return false;
+            }
+            trackHalfWidth = data.trackHalfWidth > 0f ? data.trackHalfWidth : trackHalfWidth;
+            manualPoints.clear();
+            manualPoints.addAll(data.points);
+            if (data.gridWidth > 0 && data.gridHeight > 0) {
+                resizeGrid(data.gridWidth, data.gridHeight);
+            }
+            if (manualPoints.size >= 4) {
+                rebuildSplineAndGrid();
+            }
         }
 
-        Gdx.app.log("TrackGenerator", "Map loaded: " + manualPoints.size + " points from " + fileName);
+        Gdx.app.log("TrackGenerator", "Map loaded: " + manualPoints.size + " points, grid "
+                + gridWidth + "x" + gridHeight + " from " + fileName);
         return true;
     }
 
@@ -541,16 +611,14 @@ public class TrackGenerator {
      * @param data dane toru z serwera
      */
     public void importData(TrackData data) {
-        this.gridWidth = data.gridWidth;
-        this.gridHeight = data.gridHeight;
-        this.trackHalfWidth = data.trackHalfWidth;
-        this.originX = -(gridWidth * TILE_SIZE) / 2f;
-        this.originY = -(gridHeight * TILE_SIZE) / 2f;
-        this.grid = new int[gridWidth][gridHeight];
-        
+        if (data.trackHalfWidth > 0f)
+            this.trackHalfWidth = data.trackHalfWidth;
+        if (data.gridWidth > 0 && data.gridHeight > 0)
+            resizeGrid(data.gridWidth, data.gridHeight);
+
         manualPoints.clear();
         manualPoints.addAll(data.points);
-        
+
         if (manualPoints.size >= 4) {
             rebuildSplineAndGrid();
         } else {

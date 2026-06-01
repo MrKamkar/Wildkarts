@@ -113,6 +113,9 @@ public class GameSessionController {
 
         ctx.currentState = GameState.PLAYING;
 
+        if (ctx.isMultiplayerMode)
+            createBoundaryWalls();
+
         setDrivingSystemsEnabled(true);
 
         float aspectRatio = (float) Gdx.graphics.getWidth() / Gdx.graphics.getHeight();
@@ -207,10 +210,11 @@ public class GameSessionController {
     }
 
     /**
-     * Tworzy statyczne ściany graniczne wokół obszaru testowego (tryb wieloosobowy).
+     * Tworzy statyczne ściany graniczne wokół toru (tryb wieloosobowy).
+     * Rozmiar dopasowany do bounding box mapy — wywoływać po załadowaniu toru z serwera.
      */
     public void createBoundaryWalls() {
-        float halfSize = 50f;
+        float halfSize = ctx.trackGenerator.getBoundaryHalfExtent();
         float wallThickness = 1f;
 
         createWall(0, halfSize, halfSize, wallThickness);

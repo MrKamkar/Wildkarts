@@ -1,0 +1,87 @@
+[
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -68.541664,
+	"y": 3.7916672
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 10.208333,
+	"y": 74.95833
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 36.749996,
+	"y": 75.25
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 38.49999,
+	"y": 52.5
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 1.7499956,
+	"y": 6.4166646
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -30.625,
+	"y": -0.2916643
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -46.08333,
+	"y": -20.999998
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -39.083336,
+	"y": -38.20833
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -11.08333,
+	"y": -26.833334
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 19.541656,
+	"y": -13.708335
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 48.416664,
+	"y": -34.124996
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 71.74999,
+	"y": -51.333332
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 111.70834,
+	"y": -49.291668
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 136.20833,
+	"y": -70.291664
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 119.87499,
+	"y": -88.08333
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": 69.12499,
+	"y": -85.45833
+},
+{
+	"class": "com.badlogic.gdx.math.Vector2",
+	"x": -110.25,
+	"y": -84.58333
+}
+]
