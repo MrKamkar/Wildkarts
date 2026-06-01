@@ -17,11 +17,24 @@ public class RacePositionBroadcaster {
     private final Server server;
 
     private final Comparator<ServerPlayerState> raceOrder = (a, b) -> {
+        if (a.finished && b.finished)
+            return Integer.compare(a.finishPlace, b.finishPlace);
+        if (a.finished) return -1;
+        if (b.finished) return 1;
         if (a.currentLap != b.currentLap)
             return Integer.compare(b.currentLap, a.currentLap);
         if (a.nextTrackPointIndex != b.nextTrackPointIndex)
             return Integer.compare(b.nextTrackPointIndex, a.nextTrackPointIndex);
         return Float.compare(a.distanceToNextPointSq, b.distanceToNextPointSq);
+    };
+
+    /** Sortuje graczy według kolejności mety (DNF na końcu). */
+    private final Comparator<ServerPlayerState> finishResultsOrder = (a, b) -> {
+        boolean aDnf = !a.finished || a.finishTime <= 0f;
+        boolean bDnf = !b.finished || b.finishTime <= 0f;
+        if (aDnf != bDnf) return aDnf ? 1 : -1;
+        if (aDnf) return Integer.compare(a.playerId, b.playerId);
+        return Float.compare(a.finishTime, b.finishTime);
     };
 
     /**
@@ -40,6 +53,15 @@ public class RacePositionBroadcaster {
      */
     public Comparator<ServerPlayerState> getRaceOrder() {
         return raceOrder;
+    }
+
+    /**
+     * Sortuje graczy do końcowej tabeli wyników (kolejność mety, DNF na końcu).
+     *
+     * @param sortBuffer bufor do posortowania
+     */
+    public void sortForFinishResults(List<ServerPlayerState> sortBuffer) {
+        sortBuffer.sort(finishResultsOrder);
     }
 
     /**

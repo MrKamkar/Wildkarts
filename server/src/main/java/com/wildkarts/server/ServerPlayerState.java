@@ -36,6 +36,9 @@ public class ServerPlayerState {
     public float distanceToNextPointSq = Float.MAX_VALUE;
     public float finishTime = 0f;
 
+    /** Kolejność na mecie (1 = pierwszy). 0 = jeszcze nie ukończył wyścigu. */
+    public int finishPlace = 0;
+
     /**
      * Tworzy stan gracza powiązany z identyfikatorem i połączeniem sieciowym.
      *
@@ -62,6 +65,7 @@ public class ServerPlayerState {
         lastSectorDelta = 0f;
         finished = false;
         finishTime = 0f;
+        finishPlace = 0;
         racePosition = 1;
         distanceToNextPointSq = Float.MAX_VALUE;
     }

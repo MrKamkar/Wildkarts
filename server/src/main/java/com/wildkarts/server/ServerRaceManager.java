@@ -52,6 +52,7 @@ public class ServerRaceManager {
     private float countdownTimer = COUNTDOWN_SECONDS;
     private float raceTimer = 0f;
     private int broadcastTickCounter = 0;
+    private int nextFinishPlace = 1;
 
     /**
      * Tworzy menedżer wyścigu powiązany z serwerem, transmisją i generatorem toru.
@@ -192,7 +193,21 @@ public class ServerRaceManager {
             lapTracker.advancePointPractice(state, packet.pointIndex, totalPoints);
         else
             lapTracker.advancePoint(state, packet.pointIndex, totalPoints, raceTimer,
+                    () -> onPlayerFinished(state),
                     () -> { if (allPlayersFinished()) transitionTo(RaceState.FINISHED); });
+    }
+
+    /**
+     * Rejestruje kolejność mety gracza i natychmiast wysyła aktualizację pozycji.
+     */
+    private void onPlayerFinished(ServerPlayerState state) {
+        if (state.finishPlace == 0) {
+            state.finishPlace = nextFinishPlace++;
+            Gdx.app.log("ServerRaceManager", "Player " + state.playerId
+                    + " assigned finish place P" + state.finishPlace);
+        }
+        positionBroadcaster.assignPositions(sortBuffer, playersById.values());
+        positionBroadcaster.broadcastPositions(playersById.values());
     }
 
     /**
@@ -305,6 +320,7 @@ public class ServerRaceManager {
             }
             case RACING -> {
                 countdownTimer = 0f;
+                nextFinishPlace = 1;
                 Gdx.app.log("ServerRaceManager", "Race -> RACING (GO!)");
             }
             case FINISHED -> Gdx.app.log("ServerRaceManager", "Race -> FINISHED");
@@ -326,6 +342,7 @@ public class ServerRaceManager {
         countdownTimer = COUNTDOWN_SECONDS;
         raceTimer = 0f;
         broadcastTickCounter = 0;
+        nextFinishPlace = 1;
 
         for (ServerPlayerState state : playersById.values()) {
             state.ready = false;
@@ -338,8 +355,9 @@ public class ServerRaceManager {
      * Sortuje graczy według pozycji wyścigowej i wysyła końcową tabelę wyników.
      */
     private void broadcastRaceResults() {
-        positionBroadcaster.assignPositions(sortBuffer, playersById.values());
-        sortBuffer.sort(positionBroadcaster.getRaceOrder());
+        sortBuffer.clear();
+        sortBuffer.addAll(playersById.values());
+        positionBroadcaster.sortForFinishResults(sortBuffer);
 
         int n = sortBuffer.size();
         RaceResultsPacket packet = new RaceResultsPacket();

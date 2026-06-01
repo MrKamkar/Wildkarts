@@ -75,10 +75,11 @@ public class RaceLapTracker {
      * @param passedIdx       indeks miniętego punktu kontrolnego
      * @param totalPoints     łączna liczba punktów toru
      * @param raceTimer       aktualny czas wyścigu w sekundach
-     * @param onAllFinished   callback wywoływany gdy wszyscy gracze ukończyli wyścig
+     * @param onPlayerFinished callback wywoływany gdy ten gracz ukończył wyścig
+     * @param onAllFinished    callback wywoływany gdy wszyscy gracze ukończyli wyścig
      */
     public void advancePoint(ServerPlayerState state, int passedIdx, int totalPoints,
-                             float raceTimer, Runnable onAllFinished) {
+                             float raceTimer, Runnable onPlayerFinished, Runnable onAllFinished) {
         state.nextTrackPointIndex = (passedIdx + 1) % totalPoints;
 
         int completedSectorIdx = sectorEndingAt(passedIdx, totalPoints, ServerPlayerState.TOTAL_SECTORS);
@@ -97,6 +98,8 @@ public class RaceLapTracker {
                 state.finishTime = raceTimer;
                 Gdx.app.log("ServerRaceManager",
                         "Player " + state.playerId + " FINISHED at " + String.format("%.2f", raceTimer) + "s");
+                if (onPlayerFinished != null)
+                    onPlayerFinished.run();
                 if (onAllFinished != null)
                     onAllFinished.run();
             }
